@@ -68,3 +68,9 @@ input, textarea { background: var(--bg); color: var(--text); border: 1px solid v
 .mono { font-family: ui-monospace, monospace; }
 table { border-collapse: collapse; }
 .dist tr:nth-child(odd) { background: #ffffff08; }
+
+.proposal { border-top: 1px solid var(--run); background: #1c1a12; padding: 10px 14px; max-height: 40vh; overflow: auto; position: relative; z-index: 25; }
+.proposal .phead { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.proposal .phead b { margin-right: auto; color: var(--run); }
+.proposal .prationale { font-size: 13px; white-space: pre-wrap; margin-bottom: 6px; }
+.proposal pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 12px; max-height: 240px; overflow: auto; }

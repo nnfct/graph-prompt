@@ -12,6 +12,8 @@ export const listRuns = () => fetch('/api/runs').then(j)
 export const loadRunFile = (file) => fetch(`/api/run-file?file=${encodeURIComponent(file)}`).then(j)
 export const draft = (instruction, md) =>
   fetch('/api/draft', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ instruction, md }) }).then(j)
+export const optimize = (instruction, md, name) =>
+  fetch('/api/optimize', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ instruction, md, name }) }).then(j)
 
 export function streamRun(runId, onRec, onEnd) {
   const es = new EventSource(`/api/stream/${runId}`)

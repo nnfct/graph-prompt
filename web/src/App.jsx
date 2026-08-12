@@ -21,6 +21,7 @@ export default function App() {
   const [drawer, setDrawer] = useState(null) // {mode:'trace'|'diff'|'live', ...}
   const [nl, setNl] = useState('')
   const [busy, setBusy] = useState(false)
+  const [proposal, setProposal] = useState(null) // 최적화 제안 {md, rationale}
   const stopStream = useRef(null)
 
   const graph = useMemo(() => parseGraph(md), [md])
@@ -95,6 +96,17 @@ export default function App() {
     setNl('')
   }
 
+  // 할 일(입력창 텍스트, 없어도 됨) + 현재 그래프 + 최신 run 실측 → 최적 구조 제안
+  const doOptimize = async () => {
+    if (busy) return
+    setBusy(true)
+    const r = await api.optimize(nl, md, file?.replace(/\.md$/, ''))
+    setBusy(false)
+    if (r.error) return alert(r.error + (r.raw ? '\n\n' + r.raw : ''))
+    if (r.errors?.length) return alert('제안 그래프에 오류 — 반영 안 함:\n' + r.errors.join('\n'))
+    setProposal(r) // 바로 덮어쓰지 않는다 — 근거 보고 적용/취소
+  }
+
   const toggleRun = (f) => setSelected((s) => (s.includes(f) ? s.filter((x) => x !== f) : [...s.slice(-1), f]))
   const openTrace = async () => {
     if (selected.length === 1) {
@@ -146,7 +158,22 @@ export default function App() {
           onKeyDown={(e) => e.key === 'Enter' && doDraft()}
         />
         <button onClick={doDraft} disabled={busy}>{busy ? '…' : 'AI draft'}</button>
+        <button onClick={doOptimize} disabled={busy} title="할 일(입력창) + 현재 그래프 + 최신 run 실측으로 구조를 재설계">
+          {busy ? '…' : '⚡ 최적화'}
+        </button>
       </div>
+
+      {proposal && (
+        <div className="proposal">
+          <div className="phead">
+            <b>⚡ 최적화 제안</b>
+            <button className="primary" onClick={() => { setMd(proposal.md); setProposal(null); setNl('') }}>적용</button>
+            <button onClick={() => setProposal(null)}>취소</button>
+          </div>
+          <div className="prationale">{proposal.rationale}</div>
+          <details><summary className="hint">제안 그래프 MD 미리보기</summary><pre className="mono">{proposal.md}</pre></details>
+        </div>
+      )}
 
       <div className="runstack">
         {liveRun && (

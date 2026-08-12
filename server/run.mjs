@@ -71,6 +71,7 @@ function buildPrompt(node, inputs, lens, missing = [], feedback = []) {
   const rules = [
     'JSON 객체 하나만 출력한다. 코드펜스·해설·서론 금지.',
     '최상위에 "_sources" 배열을 포함한다. 각 원소는 {claim, from} 이며 from 은 상위 노드 id 또는 URL이다.',
+    '스키마가 요구하는 정보만 담는다. 같은 내용의 반복 서술 금지 — 출력 길이가 곧 지연이다.',
   ];
   if (node.out) rules.push(`스키마: ${node.out}`);
   p.push(`# 출력 규칙\n- ${rules.join('\n- ')}`);
@@ -197,9 +198,10 @@ async function judgeLoop(node, result, cwd) {
   const prompt = `아래 출력이 조건을 충족하는지 판정한다.\n\n# 조건\n${node.loop.cond}\n\n# 출력\n${
     typeof value === 'string' ? value : JSON.stringify(value, null, 2)
   }`.slice(0, INPUT_CAP);
+  // 판정은 이진 분류 — haiku 로 충분하고 지연이 절반 이하
   const r = await sh(
     'claude',
-    ['-p', '--output-format', 'json', '--model', 'sonnet', '--tools', 'none', ...ISOLATE],
+    ['-p', '--output-format', 'json', '--model', 'haiku', '--tools', 'none', ...ISOLATE],
     `${prompt}\n\n# 출력 규칙\nJSON 하나만: {"pass": true|false, "why": "한 문장"}`,
     cwd
   );

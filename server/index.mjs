@@ -112,6 +112,78 @@ async function aiDraft(instruction, currentMd) {
   return { md: text, errors: g.errors };
 }
 
+// 최신 run 트레이스에서 노드별 실측 요약을 뽑는다 (최적화 프롬프트 재료)
+async function runStats(name) {
+  const files = (await readdir(RUNS).catch(() => []))
+    .filter((f) => f.startsWith(name + '--') && f.endsWith('.json'))
+    .sort();
+  if (!files.length) return null;
+  const d = JSON.parse(await readFile(join(RUNS, files[files.length - 1]), 'utf8'));
+  const by = new Map();
+  for (const t of d.trace || []) {
+    if (t.kind === 'loop' || t.type === 'loop' || t.skipped) continue;
+    const r = by.get(t.node) || { ms: 0, cost: 0, out: 0, iters: 0 };
+    r.ms += t.ms || 0; r.cost += t.cost || 0; r.out += t.tokens?.out || 0; r.iters += 1;
+    by.set(t.node, r);
+  }
+  const loops = (d.trace || []).filter((t) => t.kind === 'loop' || t.type === 'loop');
+  return {
+    file: files[files.length - 1],
+    totalMin: (d.summary.ms / 60000).toFixed(1),
+    lines: [...by.entries()].map(([n, r]) =>
+      `${n}: ${r.iters}회 · ${(r.ms / 1000).toFixed(0)}s · $${r.cost.toFixed(2)} · 출력 ${r.out.toLocaleString()}tok`),
+    loops: loops.map((l) => `${l.node} iter${l.iter}: ${l.repeat ? '재실행' : '종료'} — ${l.why}`),
+  };
+}
+
+// 할 일 + 현재 그래프 + 실측 → 최적화된 그래프 제안
+async function aiOptimize(instruction, md, name) {
+  const stats = name ? await runStats(name) : null;
+  const statsText = stats
+    ? `# 최신 실행 실측 (${stats.file}, 전체 ${stats.totalMin}분)\n${stats.lines.join('\n')}\n루프 판정:\n${stats.loops.join('\n') || '(없음)'}`
+    : '# 실행 이력 없음 — 구조 원칙만으로 최적화한다';
+  const prompt = `너는 그래프 엔지니어링 최적화기다. 아래 그래프를 더 빠르고 낭비 없게 재설계한다.
+
+${statsText}
+
+# 현재 그래프
+${md}
+
+${instruction ? `# 사용자의 할 일 / 요구\n${instruction}\n` : ''}
+# 최적화 원칙 (실측에 근거해서만 적용)
+- 직렬 체인 중 서로 독립인 노드는 병렬로 쪼갠다
+- 출력 토큰이 큰 노드는 out 스키마를 좁혀라 — 출력 길이가 곧 지연이다
+- 가벼운 판정·분류 노드는 model: haiku, 무거운 종합만 opus
+- 루프 되돌림 지점은 최소 범위로 (웹검색 재실행 금지)
+- 노드 수를 늘리는 게 아니라 wall-clock 을 줄이는 게 목적. 병렬화 이득이 없으면 합쳐라
+- 그래프 MD 스펙을 정확히 지킨다 (해석 불가 라인은 에러다)
+
+# 출력 형식 (정확히 이 형식)
+근거를 5줄 이내로 쓴 뒤, 구분선 =====GRAPH===== 다음 줄부터 그래프 MD 전문만 출력한다. 코드펜스 금지.`;
+
+  const r = await new Promise((ok) => {
+    const p = spawn('claude', ['-p', '--output-format', 'json', '--model', 'sonnet', '--tools', 'none', ...ISOLATE]);
+    let out = '', err = '';
+    p.stdout.on('data', (d) => (out += d));
+    p.stderr.on('data', (d) => (err += d));
+    p.on('close', () => ok({ out, err }));
+    p.stdin.write(prompt); p.stdin.end();
+  });
+  let text = '';
+  try { text = JSON.parse(r.out).result || ''; } catch { return { error: 'claude 호출 실패: ' + r.err.slice(0, 300) }; }
+  const cut = text.indexOf('=====GRAPH=====');
+  if (cut === -1) return { error: '형식 불일치 — 재시도 필요', raw: text.slice(0, 500) };
+  const rationale = text.slice(0, cut).trim();
+  let gmd = text.slice(cut + 15).replace(/^```(?:markdown|md)?\n?/m, '').replace(/\n?```\s*$/, '').trim() + '\n';
+  const g = parseGraph(gmd);
+  if (!g.errors.length) {
+    let y = 40;
+    for (const n of g.nodes) if (!n.pos) { n.pos = [Math.min(200 + n.in.length * 260, 1200), y]; y += 140; }
+    gmd = serializeGraph(g);
+  }
+  return { md: gmd, rationale, errors: g.errors };
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
@@ -178,6 +250,10 @@ const server = createServer(async (req, res) => {
     if (p === '/api/draft' && req.method === 'POST') {
       const { instruction, md } = await readBody(req);
       return json(res, 200, await aiDraft(instruction, md || ''));
+    }
+    if (p === '/api/optimize' && req.method === 'POST') {
+      const { instruction, md, name } = await readBody(req);
+      return json(res, 200, await aiOptimize(instruction || '', md || '', safeName(name) ? name : null));
     }
 
     // 정적 파일 (web/dist)
