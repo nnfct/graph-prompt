@@ -1,0 +1,9 @@
+# 실행 트레이스 — 개인 데이터 포함, 커밋 금지
+runs/
+
+# 개인 그래프 (실제 사업 판단용) — 예제(smoke)만 커밋한다
+graphs/newbiz*.md
+
+# 웹 UI (구현 시)
+node_modules/
+web/dist/
