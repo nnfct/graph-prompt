@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { markdown } from '@codemirror/lang-markdown'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { parseGraph, serializeGraph } from '../../server/parse.mjs'
+import { parseGraph, serializeGraph, autoLayout } from '../../server/parse.mjs'
 import Canvas from './Canvas.jsx'
 import { TraceList, Distribution } from './Trace.jsx'
 import Diff from './Diff.jsx'
@@ -23,6 +23,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [proposal, setProposal] = useState(null) // 최적화 제안 {md, rationale}
   const [stackOpen, setStackOpen] = useState(false) // run 비교군 — 기본 숨김
+  const [fitSignal, setFitSignal] = useState(0) // 정렬/파일 전환 후 화면 재-fit
   const stopStream = useRef(null)
 
   const graph = useMemo(() => parseGraph(md), [md])
@@ -33,7 +34,7 @@ export default function App() {
     refreshRuns()
   }, [])
 
-  const pick = (f) => { setFile(f); api.loadGraph(f).then((r) => setMd(r.md)) }
+  const pick = (f) => { setFile(f); api.loadGraph(f).then((r) => { setMd(r.md); setTimeout(() => setFitSignal((s) => s + 1), 60) }) }
 
   // 캔버스 → 그래프(정본) → MD 재직렬화
   const mutate = useCallback((fn) => {
@@ -95,6 +96,7 @@ export default function App() {
     if (r.errors?.length) return alert('draft 결과에 오류 — 반영 안 함:\n' + r.errors.join('\n'))
     setMd(r.md)
     setNl('')
+    setTimeout(() => setFitSignal((s) => s + 1), 60)
   }
 
   // 할 일(입력창 텍스트, 없어도 됨) + 현재 그래프 + 최신 run 실측 → 최적 구조 제안
@@ -128,6 +130,7 @@ export default function App() {
           {files.map((f) => <option key={f}>{f}</option>)}
         </select>
         <button onClick={addNode}>+ 노드</button>
+        <button onClick={() => { mutate((g) => autoLayout(g)); setTimeout(() => setFitSignal((s) => s + 1), 60) }} title="계층 자동 정렬 — 좌→우 흐름으로 재배치">정렬</button>
         <button onClick={save}>저장</button>
         <span className="hint" style={{ marginLeft: 'auto' }}>
           {graph.nodes.length}노드 · {graph.edges.length}엣지 {graph.errors.length ? `· 오류 ${graph.errors.length}` : ''}
@@ -148,7 +151,7 @@ export default function App() {
         </div>
         <div className="canvas-pane" tabIndex={0}
           onKeyDown={(e) => { if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); run() } }}>
-          <Canvas graph={graph} statuses={statuses} onMove={onMove} onConnect={onConnect} />
+          <Canvas graph={graph} statuses={statuses} onMove={onMove} onConnect={onConnect} fitSignal={fitSignal} />
         </div>
       </div>
 
@@ -168,7 +171,7 @@ export default function App() {
         <div className="proposal">
           <div className="phead">
             <b>⚡ 최적화 제안</b>
-            <button className="primary" onClick={() => { setMd(proposal.md); setProposal(null); setNl('') }}>적용</button>
+            <button className="primary" onClick={() => { setMd(proposal.md); setProposal(null); setNl(''); setTimeout(() => setFitSignal((s) => s + 1), 60) }}>적용</button>
             <button onClick={() => setProposal(null)}>취소</button>
           </div>
           <div className="prationale">{proposal.rationale}</div>

@@ -162,6 +162,28 @@ export function serializeGraph(g) {
   return out.replace(/\n+$/, '\n');
 }
 
+// 계층 자동 배치: rank(루트로부터 최장 경로) = 열, 열 안에서 세로 나열.
+// 좌→우 흐름이 강제되어 smoothstep 엣지가 직선/직각으로 떨어진다.
+export function autoLayout(g) {
+  const rank = new Map(g.nodes.map((n) => [n.id, 0]));
+  for (let i = 0; i < g.nodes.length; i++)
+    for (const e of g.edges)
+      rank.set(e.to, Math.max(rank.get(e.to) ?? 0, (rank.get(e.from) ?? 0) + 1));
+  const cols = new Map();
+  for (const n of g.nodes) {
+    const r = rank.get(n.id) ?? 0;
+    if (!cols.has(r)) cols.set(r, []);
+    cols.get(r).push(n);
+  }
+  const X = 320, Y = 190;
+  const maxRows = Math.max(...[...cols.values()].map((c) => c.length));
+  for (const [r, list] of cols) {
+    const offset = ((maxRows - list.length) * Y) / 2;
+    list.forEach((n, i) => { n.pos = [40 + r * X, 40 + Math.round(offset + i * Y)]; });
+  }
+  return g;
+}
+
 // 실행 순서 검증. 루프 엣지는 되돌림이므로 사이클 판정에서 제외한다.
 export function topoCheck(g) {
   const indeg = new Map(g.nodes.map((n) => [n.id, 0]));

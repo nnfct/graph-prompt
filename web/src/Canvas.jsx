@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ReactFlow, Background, Controls, Handle, Position } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
@@ -29,7 +29,9 @@ function GNode({ data }) {
 const nodeTypes = { gnode: GNode }
 
 // graph(파싱 결과) → React Flow. 드래그 종료 시 좌표만 그래프에 반영.
-export default function Canvas({ graph, statuses, onMove, onConnect }) {
+export default function Canvas({ graph, statuses, onMove, onConnect, fitSignal }) {
+  const [inst, setInst] = useState(null)
+  useEffect(() => { if (inst && fitSignal) inst.fitView({ padding: 0.12, duration: 300 }) }, [fitSignal, inst])
   const nodes = useMemo(
     () =>
       graph.nodes.map((n, i) => ({
@@ -44,11 +46,13 @@ export default function Canvas({ graph, statuses, onMove, onConnect }) {
     () => [
       ...graph.edges.map((e) => ({
         id: `${e.from}-${e.to}`, source: e.from, target: e.to,
+        type: 'smoothstep', pathOptions: { borderRadius: 4 },
         animated: statuses[e.to]?.status === 'running',
-        style: { stroke: '#4493f8' },
+        style: { stroke: '#4493f8', strokeWidth: 1.6 },
       })),
       ...graph.nodes.filter((n) => n.loop && n.loop.target !== n.id).map((n) => ({
         id: `loop-${n.id}`, source: n.id, target: n.loop.target,
+        type: 'smoothstep', pathOptions: { borderRadius: 4 },
         label: `↻ max=${n.loop.max}`, animated: true,
         style: { stroke: '#d29922', strokeDasharray: '6 4' },
         labelStyle: { fill: '#d29922' }, labelBgStyle: { fill: '#161b22' },
@@ -62,7 +66,7 @@ export default function Canvas({ graph, statuses, onMove, onConnect }) {
   return (
     <ReactFlow
       nodes={nodes} edges={edges} nodeTypes={nodeTypes}
-      onNodeDragStop={handleDragStop} onConnect={handleConnect}
+      onNodeDragStop={handleDragStop} onConnect={handleConnect} onInit={setInst}
       fitView colorMode="dark" proOptions={{ hideAttribution: true }}
     >
       <Background gap={20} color="#21262d" />

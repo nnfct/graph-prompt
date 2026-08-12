@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { readFile, writeFile, readdir, stat, mkdir } from 'node:fs/promises';
 import { createReadStream, existsSync } from 'node:fs';
 import { join, resolve, extname, basename } from 'node:path';
-import { parseGraph, serializeGraph, topoCheck } from './parse.mjs';
+import { parseGraph, serializeGraph, topoCheck, autoLayout } from './parse.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const GRAPHS = join(ROOT, 'graphs');
@@ -105,12 +105,8 @@ async function aiDraft(instruction, currentMd) {
   try { text = JSON.parse(r.out).result || ''; } catch { return { error: 'claude 호출 실패: ' + r.err.slice(0, 300) }; }
   text = text.replace(/^```(?:markdown|md)?\n?/, '').replace(/\n?```\s*$/, '').trim() + '\n';
   const g = parseGraph(text);
-  // 좌표 없는 노드에 자동 배치 (draft 는 layout 을 자주 빠뜨린다)
-  if (!g.errors.length) {
-    let y = 40;
-    for (const n of g.nodes) if (!n.pos) { n.pos = [Math.min(200 + n.in.length * 260, 1200), y]; y += 140; }
-    text = serializeGraph(g);
-  }
+  // AI 가 준 좌표는 대개 엉망 — 항상 계층 정렬로 다시 깐다
+  if (!g.errors.length) text = serializeGraph(autoLayout(g));
   return { md: text, errors: g.errors };
 }
 
@@ -180,11 +176,7 @@ ${hasGraph ? `# 현재 그래프\n${md}\n\n할 일이 현재 그래프와 같은
   const rationale = text.slice(0, cut).trim();
   let gmd = text.slice(cut + 15).replace(/^```(?:markdown|md)?\n?/m, '').replace(/\n?```\s*$/, '').trim() + '\n';
   const g = parseGraph(gmd);
-  if (!g.errors.length) {
-    let y = 40;
-    for (const n of g.nodes) if (!n.pos) { n.pos = [Math.min(200 + n.in.length * 260, 1200), y]; y += 140; }
-    gmd = serializeGraph(g);
-  }
+  if (!g.errors.length) gmd = serializeGraph(autoLayout(g));
   return { md: gmd, rationale, errors: g.errors };
 }
 
