@@ -52,7 +52,22 @@ prompt: 두 입력을 종합한다.
 
 ## 실행
 
-요구사항: Node 18+, [Claude Code CLI](https://claude.com/claude-code) 로그인. `codex` 노드는 [Codex CLI](https://github.com/openai/codex) (선택).
+요구사항: Node 18+, [Claude Code CLI](https://claude.com/claude-code) 로그인. `codex` 노드는 [Codex CLI](https://github.com/openai/codex) (선택). API 키 불필요 — 로그인된 CLI의 구독 인증을 그대로 사용한다.
+
+### 웹 콘솔
+
+```bash
+cd web && npm install && npm run build && cd ..
+npm start          # → http://localhost:4680 (127.0.0.1 전용)
+```
+
+- 좌: MD 에디터 ↔ 우: 캔버스, 실시간 양방향 (드래그=좌표, 엣지 연결=next 추가)
+- 하단 입력창: 자연어 → AI가 그래프 초안 생성/수정
+- **Ctrl+Enter = 실행.** 노드가 실시간으로 물든다 (노랑=실행중, 초록=완료, 빨강=실패)
+- run 카드 스택: 1개 클릭=트레이스(입출력 전문·근거 체인·비용 분포), **2개 클릭=diff** (요약·노드별 대조·최종 출력·그래프 MD diff)
+- 실행 중단 버튼 = 자식 프로세스 그룹째 종료 (고아 없음)
+
+### CLI
 
 ```bash
 node server/cli.mjs graphs/smoke.md
@@ -84,10 +99,11 @@ npm test   # 파서·라운드트립·루프·에러 검출, 네트워크 불필
 - [x] MD 파서 + 무손실 직렬화
 - [x] 병렬 실행기 + 루프 3종 + 피드백 주입
 - [x] 노드별 트레이스 (프롬프트·출력 전문·근거 체인·비용)
-- [ ] 웹 UI: React Flow 캔버스 ↔ MD 에디터 실시간 양방향
-- [ ] 자연어 → 그래프 AI draft
-- [ ] run 스택 + 2개 선택 diff (단일 프롬프트 vs 그래프 대조)
-- [ ] 노드 스트리밍(stream-json) + 실행 취소
+- [x] 웹 UI: React Flow 캔버스 ↔ MD 에디터 실시간 양방향
+- [x] 자연어 → 그래프 AI draft
+- [x] run 스택 + 2개 선택 diff (단일 프롬프트 vs 그래프 대조)
+- [x] 실행 취소 (프로세스 그룹 kill)
+- [ ] 노드 출력 스트리밍 (stream-json — 지금은 노드 완료 단위로 갱신)
 
 ## 라이선스
 

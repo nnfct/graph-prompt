@@ -6,6 +6,7 @@
   "description": "그래프 프롬프트 콘솔 — 그래프가 정본, MD는 직렬화. Enter 치면 병렬 실행.",
   "scripts": {
     "test": "node server/test.mjs",
-    "run-graph": "node server/cli.mjs"
+    "run-graph": "node server/cli.mjs",
+    "start": "node server/index.mjs"
   }
 }

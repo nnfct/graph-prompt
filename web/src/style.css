@@ -1,0 +1,70 @@
+:root {
+  --bg: #0e1116; --panel: #161b22; --border: #2d333b; --text: #e6edf3; --dim: #8b949e;
+  --accent: #4493f8; --ok: #3fb950; --run: #d29922; --fail: #f85149; --skip: #8b949e;
+  font-family: 'Pretendard', -apple-system, 'Segoe UI', sans-serif;
+}
+* { box-sizing: border-box; margin: 0; }
+html, body, #root { height: 100%; background: var(--bg); color: var(--text); }
+button { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+button:hover { border-color: var(--accent); }
+button.primary { background: #1f6feb; border-color: #1f6feb; font-weight: 600; }
+button.danger { border-color: var(--fail); color: var(--fail); }
+input, textarea { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 13px; }
+
+.app { display: flex; flex-direction: column; height: 100%; }
+.topbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.topbar .title { font-weight: 700; margin-right: 8px; }
+.topbar select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+.main { display: flex; flex: 1; min-height: 0; }
+.editor-pane { width: 40%; min-width: 320px; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.editor-pane .cm-editor { height: 100%; font-size: 13px; }
+.editor-pane .cm-scroller { overflow: auto; }
+.canvas-pane { flex: 1; position: relative; }
+.errors { padding: 6px 10px; background: #3d1d1f; color: #ffa198; font-size: 12px; max-height: 90px; overflow: auto; white-space: pre-wrap; }
+
+.gnode { background: var(--panel); border: 2px solid var(--border); border-radius: 8px; padding: 8px 10px; width: 210px; font-size: 12px; }
+.gnode .nid { font-weight: 700; font-size: 13px; }
+.gnode .ntype { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 6px; background: #30363d; }
+.gnode .nprompt { color: var(--dim); margin-top: 4px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.gnode .nmeta { margin-top: 4px; font-size: 10px; color: var(--dim); }
+.gnode.st-running { border-color: var(--run); box-shadow: 0 0 12px #d2992255; }
+.gnode.st-done { border-color: var(--ok); }
+.gnode.st-failed { border-color: var(--fail); }
+.gnode.st-skipped { border-color: var(--skip); opacity: 0.55; }
+.gnode .loopbadge { color: var(--run); font-size: 10px; margin-top: 2px; }
+
+.bottombar { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--panel); align-items: center; }
+.bottombar input { flex: 1; }
+.hint { font-size: 11px; color: var(--dim); }
+
+/* 드로어(z 20)보다 위 — 드로어가 열려 있어도 run 카드 선택(diff 2개째)이 가능해야 한다 */
+.runstack { border-top: 1px solid var(--border); background: var(--panel); padding: 8px 12px; display: flex; gap: 8px; overflow-x: auto; min-height: 86px; align-items: stretch; position: relative; z-index: 30; }
+.runcard { min-width: 210px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; cursor: pointer; flex-shrink: 0; }
+.runcard:hover { border-color: var(--accent); }
+.runcard.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.runcard .rname { font-weight: 600; }
+.runcard .rmeta { color: var(--dim); margin-top: 3px; }
+.runcard .rlive { color: var(--run); }
+
+.drawer { position: fixed; top: 0; right: 0; bottom: 103px; width: min(880px, 78vw); background: var(--panel); border-left: 1px solid var(--border); z-index: 20; display: flex; flex-direction: column; box-shadow: -8px 0 24px #0008; }
+.drawer .dhead { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.drawer .dbody { flex: 1; overflow: auto; padding: 12px 14px; font-size: 13px; }
+.trow { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+.trow > .thead { display: flex; gap: 10px; padding: 8px 10px; cursor: pointer; align-items: center; }
+.trow .tnode { font-weight: 700; min-width: 110px; }
+.trow .tmeta { color: var(--dim); font-size: 12px; }
+.trow .tdetail { border-top: 1px solid var(--border); padding: 10px; }
+.trow pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; overflow: auto; max-height: 320px; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.tabs button.active { border-color: var(--accent); color: var(--accent); }
+.srcchain { font-size: 12px; }
+.srcchain li { margin-bottom: 4px; }
+.bar { height: 14px; background: var(--accent); border-radius: 3px; min-width: 2px; }
+.dist td { padding: 3px 8px; font-size: 12px; }
+.diffcols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.diffcols h4 { margin-bottom: 6px; }
+.dline-add { background: #1c3324; }
+.dline-del { background: #3d1d1f; }
+.mono { font-family: ui-monospace, monospace; }
+table { border-collapse: collapse; }
+.dist tr:nth-child(odd) { background: #ffffff08; }
