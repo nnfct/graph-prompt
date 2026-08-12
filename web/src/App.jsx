@@ -22,6 +22,7 @@ export default function App() {
   const [nl, setNl] = useState('')
   const [busy, setBusy] = useState(false)
   const [proposal, setProposal] = useState(null) // 최적화 제안 {md, rationale}
+  const [stackOpen, setStackOpen] = useState(false) // run 비교군 — 기본 숨김
   const stopStream = useRef(null)
 
   const graph = useMemo(() => parseGraph(md), [md])
@@ -175,22 +176,33 @@ export default function App() {
         </div>
       )}
 
-      <div className="runstack">
+      <div className="stackbar" onClick={() => setStackOpen((o) => !o)}>
+        <span>{stackOpen ? '▾' : '▸'} run 비교군 {runs.length}개</span>
         {liveRun && (
-          <div className="runcard selected" onClick={() => setDrawer({ mode: 'live' })}>
-            <div className="rname rlive">● {liveRun.name} 실행 중</div>
-            <div className="rmeta">{Object.values(statuses).filter((s) => s.status === 'done').length}/{graph.nodes.length} 노드 완료</div>
-          </div>
+          <span className="rlive">
+            ● {liveRun.name} 실행 중 — {Object.values(statuses).filter((s) => s.status === 'done').length}/{graph.nodes.length} 노드
+          </span>
         )}
-        {runs.map((r) => (
-          <div key={r.file} className={`runcard ${selected.includes(r.file) ? 'selected' : ''}`} onClick={() => toggleRun(r.file)}>
-            <div className="rname">{runLabel(r.file)}</div>
-            <div className="rmeta">{(r.size / 1024).toFixed(0)}KB · {new Date(r.mtime).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
-            <div className="rmeta hint">{selected.includes(r.file) ? '선택됨 — 2개 선택 시 diff' : '클릭: 트레이스'}</div>
-          </div>
-        ))}
-        {!runs.length && !liveRun && <span className="hint">아직 run 없음 — 그래프 짜고 Ctrl+Enter</span>}
+        {!stackOpen && selected.length > 0 && <span className="hint">선택 {selected.length}개</span>}
       </div>
+      {stackOpen && (
+        <div className="runstack">
+          {liveRun && (
+            <div className="runcard selected" onClick={() => setDrawer({ mode: 'live' })}>
+              <div className="rname rlive">● {liveRun.name} 실행 중</div>
+              <div className="rmeta">{Object.values(statuses).filter((s) => s.status === 'done').length}/{graph.nodes.length} 노드 완료</div>
+            </div>
+          )}
+          {runs.map((r) => (
+            <div key={r.file} className={`runcard ${selected.includes(r.file) ? 'selected' : ''}`} onClick={() => toggleRun(r.file)}>
+              <div className="rname">{runLabel(r.file)}</div>
+              <div className="rmeta">{(r.size / 1024).toFixed(0)}KB · {new Date(r.mtime).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+              <div className="rmeta hint">{selected.includes(r.file) ? '선택됨 — 2개 선택 시 diff' : '클릭: 트레이스'}</div>
+            </div>
+          ))}
+          {!runs.length && !liveRun && <span className="hint">아직 run 없음 — 그래프 짜고 Ctrl+Enter</span>}
+        </div>
+      )}
 
       {drawer && (
         <div className="drawer">

@@ -77,9 +77,7 @@ async function startRun(md, name) {
   return { runId };
 }
 
-// 자연어 → 그래프 MD (draft / patch). 파싱 검증 후 반환, 실패 시 에러와 원문.
-async function aiDraft(instruction, currentMd) {
-  const spec = `그래프 MD 스펙:
+const SPEC = `그래프 MD 스펙:
 - frontmatter 에 title, layout(노드별 [x,y])
 - "## 노드id \`타입\`" 헤딩 하나 = 노드 하나. 타입: claude | codex | research | red-team
 - 속성: prompt(멀티라인은 "prompt: |" 뒤 2칸 들여쓰기), out(출력 JSON 스키마), next(쉼표=병렬 분기), in(생략시 next에서 역산), lens(쉼표 구분 — 렌즈별 동시 실행), model(선택), loop
@@ -87,6 +85,10 @@ async function aiDraft(instruction, currentMd) {
 - 병렬 갈래는 next 를 여러 노드로. 합류는 그 노드들의 next 를 같은 노드로.
 - research 노드만 웹검색 가능. red-team 은 lens 3개(출처신뢰도, 결론반증, 놓친관점)가 관례.
 - 해석 불가 라인은 에러다. 스펙 밖 문법 금지. 주석 금지.`;
+
+// 자연어 → 그래프 MD (draft / patch). 파싱 검증 후 반환, 실패 시 에러와 원문.
+async function aiDraft(instruction, currentMd) {
+  const spec = SPEC;
   const prompt = currentMd
     ? `${spec}\n\n# 현재 그래프\n${currentMd}\n\n# 지시\n${instruction}\n\n# 출력 규칙\n수정된 그래프 MD 전문만 출력한다. 코드펜스·해설 금지. frontmatter(---)부터 시작한다.`
     : `${spec}\n\n# 지시\n다음 작업을 수행하는 그래프를 설계한다: ${instruction}\n\n노드 4~9개. 병렬 갈래와 검증(red-team) 단계를 적극 사용한다.\n\n# 출력 규칙\n그래프 MD 전문만 출력한다. 코드펜스·해설 금지. frontmatter(---)부터 시작한다.`;
@@ -142,14 +144,16 @@ async function aiOptimize(instruction, md, name) {
   const statsText = stats
     ? `# 최신 실행 실측 (${stats.file}, 전체 ${stats.totalMin}분)\n${stats.lines.join('\n')}\n루프 판정:\n${stats.loops.join('\n') || '(없음)'}`
     : '# 실행 이력 없음 — 구조 원칙만으로 최적화한다';
-  const prompt = `너는 그래프 엔지니어링 최적화기다. 아래 그래프를 더 빠르고 낭비 없게 재설계한다.
+  const hasGraph = md && md.trim().length > 0;
+  const prompt = `너는 그래프 엔지니어링 최적화기다. 사용자의 할 일에 최적인 그래프를 설계한다.
 
+${SPEC}
+
+${instruction ? `# 사용자의 할 일 / 요구 (최우선)\n${instruction}\n` : ''}
 ${statsText}
 
-# 현재 그래프
-${md}
+${hasGraph ? `# 현재 그래프\n${md}\n\n할 일이 현재 그래프와 같은 작업이면 실측에 근거해 재설계하고, 다른 새 작업이면 현재 그래프는 참고만 하고 할 일에 맞는 그래프를 처음부터 최적으로 설계한다.` : '# 현재 그래프 없음 — 할 일에 맞는 그래프를 처음부터 최적으로 설계한다.'}
 
-${instruction ? `# 사용자의 할 일 / 요구\n${instruction}\n` : ''}
 # 최적화 원칙 (실측에 근거해서만 적용)
 - 직렬 체인 중 서로 독립인 노드는 병렬로 쪼갠다
 - 출력 토큰이 큰 노드는 out 스키마를 좁혀라 — 출력 길이가 곧 지연이다
