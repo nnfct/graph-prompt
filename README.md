@@ -86,7 +86,7 @@ node server/cli.mjs graphs/smoke.md
 - `*.jsonl` — 증분 저장. run 도중 죽어도 그때까지의 기록 보존
 - `*.json` — 완주 후 전체 (실행 시점 그래프 MD 원문 동봉 → run 간 diff 가능)
 
-노드는 격리 실행된다 (`--strict-mcp-config --setting-sources ''`) — 개인 설정·MCP가 노드 프롬프트를 오염시키지 않고, 호출당 고정 컨텍스트가 57k → 5.4k 토큰으로 줄어든다.
+노드는 격리 실행된다 (`--strict-mcp-config --setting-sources ''`) — 개인 설정·MCP가 노드 프롬프트를 오염시키지 않고, 호출당 고정 컨텍스트가 줄어든다 (실측 중앙값 48.5k → 8.9k 토큰, n=3 — 비격리 값은 설치된 플러그인에 따라 다르다. 재현: `node benchmarks/measure.mjs`, 결과 아티팩트는 `benchmarks/*.json`).
 
 ## 테스트
 

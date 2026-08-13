@@ -1,0 +1,54 @@
+{
+  "date": "2026-08-13",
+  "n": 3,
+  "cliVersion": "2.1.229 (Claude Code)",
+  "note": "고정 컨텍스트 = cache_creation + cache_read. 비격리는 세션 디렉토리·설치 플러그인에 따라 변동.",
+  "isolatedContextTok": {
+    "runs": [
+      8897,
+      8897,
+      8897
+    ],
+    "median": 8897
+  },
+  "plainContextTok": {
+    "runs": [
+      48535,
+      48535,
+      48535
+    ],
+    "median": 48535
+  },
+  "isolatedCostUsd": {
+    "runs": [
+      0.035326699999999996,
+      0.0033611,
+      0.0033611
+    ],
+    "median": 0.0033611
+  },
+  "plainCostUsd": {
+    "runs": [
+      0.291291,
+      0.0146415,
+      0.0146415
+    ],
+    "median": 0.0146415
+  },
+  "draftFirstDeltaMs": {
+    "runs": [
+      2324,
+      2377,
+      2249
+    ],
+    "median": 2324
+  },
+  "draftTotalMs": {
+    "runs": [
+      7188,
+      6874,
+      7674
+    ],
+    "median": 7188
+  }
+}
