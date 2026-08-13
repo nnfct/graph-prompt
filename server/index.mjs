@@ -239,9 +239,26 @@ function streamClaude(res, prompt, finalize) {
   p.stdin.write(prompt); p.stdin.end();
 }
 
+// CSRF/DNS-리바인딩 방어.
+// - Origin 이 있으면(브라우저 요청) 우리 오리진만 허용 — 악성 페이지의
+//   no-cors/text/plain 요청도 Origin 은 반드시 실어 보내므로 여기서 죽는다.
+// - Host 는 항상 검증 — 공격자 도메인을 127.0.0.1 로 리졸브시키는
+//   DNS 리바인딩은 Host 헤더가 공격자 도메인이라 걸린다.
+// - Origin 없는 요청(curl 등 로컬 도구)은 허용.
+const ALLOWED_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:${PORT}`]);
+function originOk(req) {
+  if (!ALLOWED_HOSTS.has(req.headers.host)) return false;
+  const o = req.headers.origin;
+  if (o == null) return true;
+  try { return ALLOWED_HOSTS.has(new URL(o).host); } catch { return false; }
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
+  if (p.startsWith('/api/') && !originOk(req)) {
+    return json(res, 403, { error: 'origin/host 검증 실패 — 로컬 UI 또는 로컬 도구에서만 호출 가능' });
+  }
   try {
     if (p === '/api/graphs' && req.method === 'GET') {
       const files = (await readdir(GRAPHS)).filter((f) => f.endsWith('.md'));
