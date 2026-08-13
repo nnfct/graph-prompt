@@ -7,3 +7,4 @@ graphs/newbiz*.md
 # 웹 UI (구현 시)
 node_modules/
 web/dist/
+*.tmp.mjs

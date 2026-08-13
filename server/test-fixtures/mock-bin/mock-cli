@@ -1,0 +1,55 @@
+#!/bin/sh
+
+cli=$1
+shift
+prompt=$(cat)
+
+if [ -n "${MOCK_PROMPT_LOG:-}" ]; then
+  {
+    printf '%s\n' "$prompt"
+    printf '%s\n' '__MOCK_PROMPT_END__'
+  } >> "$MOCK_PROMPT_LOG"
+fi
+
+delay=$(printf '%s\n' "$prompt" | sed -n 's/^MOCK_DELAY_MS:\([0-9][0-9]*\)$/\1/p' | sed -n '1p')
+if [ -n "$delay" ]; then
+  seconds=$(awk -v ms="$delay" 'BEGIN { printf "%.3f", ms / 1000 }')
+  sleep "$seconds"
+fi
+
+case "$prompt" in
+  *MOCK_FAIL*)
+    printf '%s\n' 'MOCK_FAIL requested' >&2
+    exit 1
+    ;;
+esac
+
+result=$(printf '%s\n' "$prompt" | sed -n 's/^MOCK_OUTPUT://p' | sed -n '1p')
+[ -n "$result" ] || result='{"mock":true}'
+
+case "$cli" in
+  claude)
+    escaped=$(printf '%s' "$result" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+    printf '{"is_error":false,"result":"%s","total_cost_usd":0.01,"usage":{"input_tokens":11,"output_tokens":7,"cache_creation_input_tokens":3,"cache_read_input_tokens":2}}' "$escaped"
+    ;;
+  codex)
+    output=''
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = '-o' ]; then
+        shift
+        output=${1:-}
+        break
+      fi
+      shift
+    done
+    if [ -z "$output" ]; then
+      printf '%s\n' 'mock codex requires -o <file>' >&2
+      exit 2
+    fi
+    printf '%s' "$result" > "$output"
+    ;;
+  *)
+    printf 'unknown mock CLI: %s\n' "$cli" >&2
+    exit 2
+    ;;
+esac

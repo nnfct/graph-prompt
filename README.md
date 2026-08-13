@@ -52,7 +52,7 @@ prompt: 두 입력을 종합한다.
 
 ## 실행
 
-요구사항: Node 18+, [Claude Code CLI](https://claude.com/claude-code) 로그인. `codex` 노드는 [Codex CLI](https://github.com/openai/codex) (선택). API 키 불필요 — 로그인된 CLI의 구독 인증을 그대로 사용한다.
+요구사항: Node 20.11+ (POSIX — Linux/macOS/WSL. Windows 네이티브는 실행 취소 시 프로세스 정리가 불완전), [Claude Code CLI](https://claude.com/claude-code) 로그인. `codex` 노드는 [Codex CLI](https://github.com/openai/codex) (선택). API 키 불필요 — 로그인된 CLI의 구독 인증을 그대로 사용한다.
 
 ### 웹 콘솔
 

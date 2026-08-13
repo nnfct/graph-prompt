@@ -7,6 +7,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { join, resolve, extname, basename } from 'node:path';
 import { parseGraph, serializeGraph, topoCheck, autoLayout } from './parse.mjs';
 import { checkCli, reportCli } from './cli-check.mjs';
+import { newRunId } from './run.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const GRAPHS = join(ROOT, 'graphs');
@@ -45,7 +46,7 @@ async function startRun(md, name) {
   if (g.errors.length) return { errors: g.errors };
   if (!topoCheck(g).ok) return { errors: ['사이클 존재 — 되돌림은 loop: 로만 표현한다.'] };
 
-  const runId = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const runId = newRunId();
   await mkdir(LIVE, { recursive: true });
   const mdFile = join(LIVE, `${name}--${runId}.md`);
   await writeFile(mdFile, md);

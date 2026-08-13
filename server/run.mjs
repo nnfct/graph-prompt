@@ -6,7 +6,7 @@
 //            입력 전멸 시에만 skipped.
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, writeFile, appendFile, unlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, appendFile, unlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loopScope } from './parse.mjs';
@@ -22,6 +22,12 @@ const INPUT_CAP = 60000;
 
 function attr(node, k) {
   return node.attrs.find((a) => a.k === k)?.v;
+}
+
+// 초 단위 타임스탬프만 쓰면 같은 초에 시작한 run 2개가 서로를 덮는다 — 랜덤 접미사 필수
+export function newRunId() {
+  const rand = Math.random().toString(36).slice(2, 6);
+  return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '-' + rand;
 }
 
 function sh(cmd, args, stdin, cwd) {
@@ -224,7 +230,7 @@ async function judgeLoop(node, result, cwd) {
 }
 
 export async function runGraph(graph, { emit = () => {}, appendEvent = null, runId } = {}) {
-  runId = runId || new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  runId = runId || newRunId();
   const cwd = await mkdtemp(join(tmpdir(), 'gc-run-'));
   const state = new Map(graph.nodes.map((n) => [n.id, { status: 'pending', result: null, iter: 0 }]));
   // 외부 텍스트 오염 추적: research 노드 출력과, 그것을 입력으로 받은
@@ -365,6 +371,8 @@ export async function runGraph(graph, { emit = () => {}, appendEvent = null, run
   };
   emit({ type: 'run:end', ...summary });
   if (appendEvent) appendEvent({ kind: 'run:end', ...summary });
+  // 노드 원문은 트레이스에 이미 있다 — 작업용 tmpdir 는 남기면 그냥 새는 것
+  await rm(cwd, { recursive: true, force: true }).catch(() => {});
   return { summary, trace, state: statuses };
 }
 

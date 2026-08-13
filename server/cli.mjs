@@ -2,7 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { parseGraph, topoCheck } from './parse.mjs';
-import { runGraph, saveRun, makeAppender } from './run.mjs';
+import { runGraph, saveRun, makeAppender, newRunId } from './run.mjs';
 import { reportCli } from './cli-check.mjs';
 
 const file = process.argv[2];
@@ -14,7 +14,7 @@ const g = parseGraph(md);
 if (g.errors.length) { console.error('그래프 오류:\n- ' + g.errors.join('\n- ')); process.exit(1); }
 if (!topoCheck(g).ok) { console.error('그래프 오류: 사이클 존재 — 되돌림은 loop: 로만 표현한다.'); process.exit(1); }
 
-const runId = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+const runId = newRunId();
 const appender = makeAppender(resolve('runs'), basename(file, '.md'), runId);
 const t0 = Date.now();
 const el = () => `${String((Date.now() - t0) / 1000).padStart(6)}s`;
