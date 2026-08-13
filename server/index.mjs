@@ -88,7 +88,7 @@ const SPEC = `그래프 MD 스펙:
 - loop 문법: "loop: until(조건, max=N) -> 대상노드" 또는 "loop: max=N -> 대상노드". 조건은 숫자비교식(coverage>=0.9) 또는 자연어(AI가 판정)
 - 병렬 갈래는 next 를 여러 노드로. 합류는 그 노드들의 next 를 같은 노드로.
 - research 노드만 웹검색 가능. red-team 은 lens 3개(출처신뢰도, 결론반증, 놓친관점)가 관례.
-- 해석 불가 라인은 에러다. 스펙 밖 문법 금지. 주석 금지.`;
+- 해석 불가 라인은 에러다. 스펙 밖 문법 금지. 주석 금지.\n- title 과 각 노드의 prompt 는 사용자 지시와 같은 언어로 쓴다 (영어 지시 → 영어 프롬프트).`;
 
 function draftPrompt(instruction, currentMd) {
   return currentMd

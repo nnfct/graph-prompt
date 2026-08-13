@@ -1,71 +1,86 @@
 # graph-prompt
 
-**그래프 프롬프트 콘솔** — 프롬프트 하나에 다 밀어넣는 대신, 작업을 노드로 쪼개고 에이전트를 배정하고 병렬/직렬/루프로 정보 흐름을 설계한다. Enter를 치면 그래프가 곧 프롬프트처럼 실행된다.
+**Stop prompt engineering. Start graph engineering.**
 
-*A graph-as-prompt console: split one big prompt into a graph of agent nodes (parallel / serial / loop), press Enter, and the graph executes with a full per-node trace.*
+Instead of stuffing everything into one prompt, split the work into a graph of agent nodes — assign roles, wire the information flow (parallel / serial / loop), and press Enter. The graph executes like a prompt, with a full per-node trace.
 
-## 왜
+[한국어 README](README.ko.md)
 
-단일 프롬프트는 블랙박스다. 어떤 근거가 어디서 왔는지, 어느 단계가 시간을 먹었는지, 반박이 실제로 반영됐는지 보이지 않는다.
+![demo](docs/demo.gif)
 
-graph-prompt는 같은 작업을 **그래프**로 표현한다:
+## Why
 
-- **노드** = 에이전트 1명 (`claude` / `codex` / `research` / `red-team`)
-- **엣지** = 정보 흐름. 병렬 갈래는 **진짜 동시 실행** (자식 프로세스 동시 spawn)
-- **루프** = 종료조건 3종: 횟수(`max=3`) / 조건식(`until(coverage>=0.9)`) / AI판단(`until(충분히 검증되었는가)`)
-- **트레이스** = 노드별 실제 발송 프롬프트·출력 전문·근거 체인(`_sources`)·토큰·비용·시간
+A single prompt is a black box. You can't see which claim came from which source, which step burned the time, or whether the counter-arguments were actually considered.
 
-그래프가 정본이고 MD는 직렬화 산출물이다. 라운드트립 무손실 — 해석 불가 라인은 조용히 버리지 않고 에러로 거부한다.
+graph-prompt expresses the same task as a **graph**:
 
-## 그래프 MD 스펙
+- **Node** = one agent (`claude` / `codex` / `research` / `red-team`)
+- **Edge** = information flow. Parallel branches run **truly concurrently** (child processes spawned together)
+- **Loop** = three exit conditions: count (`max=3`) / expression (`until(coverage>=0.9)`) / AI judgment (`until(is this verified enough)`)
+- **Trace** = per node: the exact prompt sent, full output, source chain (`_sources`), tokens, cost, time
 
-헤딩 하나 = 노드 하나.
+The graph is the source of truth; the MD file is its serialization. Round-trip is lossless — unparseable lines are rejected as errors, never silently dropped.
+
+**vs. agent fleet managers (Orca, herdr):** those tools supervise *agents* — N independent attempts racing on the same task. graph-prompt designs the *information flow between agents* — branches doing different jobs, merging, looping with feedback. They compose well: run graph-prompt inside a herdr pane.
+
+## What it looks like
+
+Type a task in plain language → AI drafts a graph, streaming into the editor → drag/edit nodes on the canvas or in MD (bidirectional, real-time) → **Ctrl+Enter** → nodes light up as they run in parallel → the run lands in a stack → click one run for the full trace, click two for a **diff**.
+
+The diff is the point: run the same question as a single prompt (1-node graph) and as a real graph, put them side by side, and see exactly where they diverged — per node, with receipts.
+
+## Graph MD spec
+
+One heading = one node.
 
 ```markdown
 ---
-title: 예제
+title: example
 layout:
-  a: [80, 40]        # 캔버스 좌표 (선택)
+  a: [80, 40]        # canvas coordinates (optional)
 ---
 
 ## a `claude`
 next: merge
 prompt: |
-  단어 "빨강" 하나만 반환한다.
+  Return exactly the word "red".
 out: {word: str}
 
 ## b `research`
 next: merge
-prompt: 웹에서 근거를 찾는다. 출처 URL 필수.
+prompt: Find evidence on the web. Source URLs required.
 
 ## merge `claude`
-in: a, b             # 생략 시 next 로부터 자동 역산
+in: a, b             # inferred from next: if omitted
 loop: until(quality>=0.9, max=3) -> a
-prompt: 두 입력을 종합한다.
+prompt: Synthesize both inputs.
 ```
 
-- `next:` — 하류 노드 (쉼표 = 병렬 분기)
-- `loop:` — 미달 시 `->` 대상으로 되돌아 재실행. **미달 사유가 다음 회차 프롬프트에 자동 주입**된다 (같은 주사위 다시 굴리기가 아니라 개선 루프)
-- `lens:` — 렌즈 여러 개면 렌즈별 동시 실행 (예: red-team을 출처신뢰도/결론반증/놓친관점 3방향으로)
-- `out:` — 출력 스키마. 노드 간 데이터는 JSON 강제
-- 병렬 갈래 일부 실패 시 합류 노드는 남은 입력으로 진행(`degraded`), 전멸 시만 스킵
+- `next:` — downstream nodes (comma = parallel fan-out)
+- `loop:` — on failure, re-run from the `->` target. **The failure reason is injected into the next iteration's prompt** — an improvement loop, not a re-roll of the same dice
+- `lens:` — multiple lenses run concurrently (e.g. red-team through source-credibility / refutation / missing-angles)
+- `out:` — output schema; node-to-node data is JSON
+- If some parallel branches fail, the merge node proceeds with the surviving inputs (`degraded`); it is skipped only when all inputs are gone
 
-## 실행
+## Run it
 
-요구사항: Node 20.11+ (POSIX — Linux/macOS/WSL. Windows 네이티브는 실행 취소 시 프로세스 정리가 불완전), [Claude Code CLI](https://claude.com/claude-code) 로그인. `codex` 노드는 [Codex CLI](https://github.com/openai/codex) (선택). API 키 불필요 — 로그인된 CLI의 구독 인증을 그대로 사용한다.
+Requirements: Node 20.11+ (POSIX — Linux/macOS/WSL; on native Windows, cancel may leave child processes), a logged-in [Claude Code CLI](https://claude.com/claude-code). `codex` nodes need the [Codex CLI](https://github.com/openai/codex) (optional). **No extra API key** — it drives the CLIs you're already logged into.
 
-### 웹 콘솔
+> Note: graph runs consume your subscription quota (or API credits if your CLI is key-based). A multi-node research graph can be the equivalent of several dollars per run — the trace shows the exact per-node cost.
+
+### Web console
 
 ```bash
 cd web && npm install && npm run build && cd ..
-npm start          # → http://localhost:4680 (127.0.0.1 전용)
+npm start          # → http://localhost:4680 (127.0.0.1 only)
 ```
 
-- 좌: MD 에디터 ↔ 우: 캔버스, 실시간 양방향 (드래그=좌표, 엣지 연결=next 추가)
-- 하단 입력창: 자연어 → AI가 그래프 초안 생성/수정
-- **Ctrl+Enter = 실행.** 노드가 실시간으로 물든다 (노랑=실행중, 초록=완료, 빨강=실패)
-- run 카드 스택: 1개 클릭=트레이스(입출력 전문·근거 체인·비용 분포), **2개 클릭=diff** (요약·노드별 대조·최종 출력·그래프 MD diff)
-- 실행 중단 버튼 = 자식 프로세스 그룹째 종료 (고아 없음)
+- Left: MD editor ↔ right: canvas, real-time bidirectional (drag = coordinates, connect = `next`)
+- Bottom input: plain language → AI drafts/edits the graph (streaming)
+- **⚡ Optimize**: redesigns the graph from your task + the latest run's per-node measurements
+- **Roles** button: a curated library of graph-engineering roles (planner, fact-checker, devil's advocate, judge panel, …) — one click inserts a node template
+- Run stack: 1 card = trace (prompt/output/sources/cost per node, critical path ⚡), 2 cards = diff
+- Stop button kills the whole process group — no orphaned CLI processes
 
 ### CLI
 
@@ -74,37 +89,42 @@ node server/cli.mjs graphs/smoke.md
 ```
 
 ```
- 0.002s ▶ 실행 시작 — 노드 3개
- 0.003s ┌ a [claude] 시작 (iter 1)
- 0.006s ┌ b [claude] 시작 (iter 1)      ← 진짜 병렬
-  5.15s ┌ merge [claude] 시작 (iter 1)
-  9.22s ■ 종료 · $0.0816 · 실패 [없음]
+ 0.002s ▶ run start — 3 nodes
+ 0.003s ┌ a [claude] start (iter 1)
+ 0.006s ┌ b [claude] start (iter 1)      ← true parallelism
+  5.15s ┌ merge [claude] start (iter 1)
+  9.22s ■ done · $0.0816 · failed [none]
 ```
 
-트레이스는 `runs/`에 2형식으로 남는다:
+Traces land in `runs/` in two forms:
 
-- `*.jsonl` — 증분 저장. run 도중 죽어도 그때까지의 기록 보존
-- `*.json` — 완주 후 전체 (실행 시점 그래프 MD 원문 동봉 → run 간 diff 가능)
+- `*.jsonl` — incremental; if the run dies midway, everything up to that point survives
+- `*.json` — complete, with the graph MD embedded at run time (enables run-to-run diff)
 
-노드는 격리 실행된다 (`--strict-mcp-config --setting-sources ''`) — 개인 설정·MCP가 노드 프롬프트를 오염시키지 않고, 호출당 고정 컨텍스트가 줄어든다 (실측 중앙값 48.5k → 8.9k 토큰, n=3 — 비격리 값은 설치된 플러그인에 따라 다르다. 재현: `node benchmarks/measure.mjs`, 결과 아티팩트는 `benchmarks/*.json`).
+Nodes run isolated (`--strict-mcp-config --setting-sources ''`) — your personal settings and MCP servers never leak into node prompts, and the fixed context per call drops (measured median 48.5k → 8.9k tokens, n=3; the non-isolated number depends on your installed plugins. Reproduce: `node benchmarks/measure.mjs`).
 
-## 테스트
+## Security model
+
+Local-only by design: the server binds to 127.0.0.1 and rejects cross-origin requests (Origin/Host validation — drive-by `fetch` from a malicious page gets 403). Web text collected by `research` nodes is taint-tracked and wrapped in per-block random delimiters before entering any downstream prompt, including loop feedback and loop judges — a hostile web page can't inject instructions into your `codex` nodes.
+
+## Tests
 
 ```bash
-npm test   # 파서·라운드트립·루프·에러 검출, 네트워크 불필요
+npm test   # parser (22) + executor with mock CLIs (7), fully offline
 ```
 
-## 로드맵
+## Roadmap
 
-- [x] MD 파서 + 무손실 직렬화
-- [x] 병렬 실행기 + 루프 3종 + 피드백 주입
-- [x] 노드별 트레이스 (프롬프트·출력 전문·근거 체인·비용)
-- [x] 웹 UI: React Flow 캔버스 ↔ MD 에디터 실시간 양방향
-- [x] 자연어 → 그래프 AI draft
-- [x] run 스택 + 2개 선택 diff (단일 프롬프트 vs 그래프 대조)
-- [x] 실행 취소 (프로세스 그룹 kill)
-- [ ] 노드 출력 스트리밍 (stream-json — 지금은 노드 완료 단위로 갱신)
+- [x] MD parser + lossless serialization
+- [x] Parallel executor, 3 loop exit kinds, loop feedback injection
+- [x] Per-node trace (prompt, output, source chain, cost), critical path
+- [x] Web UI: canvas ↔ MD bidirectional, streaming AI draft, run stack + diff
+- [x] Measured-run optimizer, role library, CSRF/injection hardening, CI
+- [ ] `npx graph-prompt` one-command start
+- [ ] Template gallery incl. a <$0.5 five-minute solo-vs-graph diff demo
+- [ ] Race template (same graph ×N in parallel → judge) — self-consistency for decision graphs
+- [ ] Trace HTML export for sharing
 
-## 라이선스
+## License
 
-MIT
+MIT. Not affiliated with Anthropic or OpenAI; "Claude" and "Codex" refer to their respective CLIs.

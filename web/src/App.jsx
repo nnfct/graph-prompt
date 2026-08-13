@@ -60,7 +60,7 @@ export default function App() {
   }), [mutate])
   const addNode = () => mutate((g) => {
     let i = 1; while (g.nodes.some((n) => n.id === `node${i}`)) i++
-    g.nodes.push({ id: `node${i}`, type: 'claude', attrs: [{ k: 'prompt', v: '지시를 쓴다', block: false }], prompt: '지시를 쓴다', out: '', lens: [], next: [], inExplicit: [], in: [], loop: null, pos: [80, 80 + g.nodes.length * 60] })
+    g.nodes.push({ id: `node${i}`, type: 'claude', attrs: [{ k: 'prompt', v: 'write the instruction', block: false }], prompt: 'write the instruction', out: '', lens: [], next: [], inExplicit: [], in: [], loop: null, pos: [80, 80 + g.nodes.length * 60] })
   })
 
   const save = () => file && api.saveGraph(file, md)
@@ -72,7 +72,7 @@ export default function App() {
     const name = file.replace(/\.md$/, '')
     const r = await api.startRun(md, name)
     setBusy(false)
-    if (r.errors) return alert('그래프 오류:\n' + r.errors.join('\n'))
+    if (r.errors) return alert('Graph errors:\n' + r.errors.join('\n'))
     const events = []
     setStatuses(Object.fromEntries(graph.nodes.map((n) => [n.id, { status: 'pending', iter: 0 }])))
     setLiveRun({ runId: r.runId, name })
@@ -100,10 +100,10 @@ export default function App() {
     let acc = ''
     let last = 0
     const r = await api.streamGen('/api/draft-stream', { instruction: nl, md }, (rec) => {
-      if (rec.think) return setGenInfo(`생각 중… ${rec.think} tok`)
+      if (rec.think) return setGenInfo(`thinking… ${rec.think} tok`)
       if (!rec.t) return
       acc += rec.t
-      setGenInfo(`생성 중… ${acc.length}자`)
+      setGenInfo(`writing… ${acc.length} chars`)
       const now = Date.now()
       if (now - last > 120) { last = now; setMd(acc) } // CodeMirror 과부하 방지
     })
@@ -111,7 +111,7 @@ export default function App() {
     setBusy(false)
     setGenInfo('')
     if (r.error) { setMd(before); return alert(r.error) }
-    if (r.errors?.length) { setMd(before); return alert('draft 결과에 오류 — 반영 안 함:\n' + r.errors.join('\n')) }
+    if (r.errors?.length) { setMd(before); return alert('Draft has errors — not applied:\n' + r.errors.join('\n')) }
     setMd(r.md)
     setNl('')
     setTimeout(() => setFitSignal((s) => s + 1), 60)
@@ -125,7 +125,7 @@ export default function App() {
     let acc = ''
     let last = 0
     const r = await api.streamGen('/api/optimize-stream', { instruction: nl, md, name: file?.replace(/\.md$/, '') }, (rec) => {
-      if (rec.think) return setProposal({ streaming: true, rationale: `생각 중… ${rec.think} tok`, md: '' })
+      if (rec.think) return setProposal({ streaming: true, rationale: `thinking… ${rec.think} tok`, md: '' })
       if (!rec.t) return
       acc += rec.t
       const now = Date.now()
@@ -133,7 +133,7 @@ export default function App() {
     })
     setBusy(false)
     if (r.error) { setProposal(null); return alert(r.error + (r.raw ? '\n\n' + r.raw : '')) }
-    if (r.errors?.length) { setProposal(null); return alert('제안 그래프에 오류 — 반영 안 함:\n' + r.errors.join('\n')) }
+    if (r.errors?.length) { setProposal(null); return alert('Proposed graph has errors — not applied:\n' + r.errors.join('\n')) }
     setProposal(r) // 근거 보고 적용/취소
   }
 
@@ -173,16 +173,16 @@ export default function App() {
         <select value={file || ''} onChange={(e) => pick(e.target.value)}>
           {files.map((f) => <option key={f}>{f}</option>)}
         </select>
-        <button onClick={addNode}>+ 노드</button>
-        <button onClick={() => { mutate((g) => autoLayout(g)); setTimeout(() => setFitSignal((s) => s + 1), 60) }} title="계층 자동 정렬 — 좌→우 흐름으로 재배치">정렬</button>
-        <button onClick={() => setRolesOpen((o) => !o)} title="그래프 엔지니어링 역할 라이브러리">{rolesOpen ? '역할 ▾' : '역할 ▸'}</button>
-        <button onClick={save}>저장</button>
+        <button onClick={addNode}>+ Node</button>
+        <button onClick={() => { mutate((g) => autoLayout(g)); setTimeout(() => setFitSignal((s) => s + 1), 60) }} title="Auto layout — layered left-to-right flow">Layout</button>
+        <button onClick={() => setRolesOpen((o) => !o)} title="Graph-engineering role library">{rolesOpen ? 'Roles ▾' : 'Roles ▸'}</button>
+        <button onClick={save}>Save</button>
         <span className="hint" style={{ marginLeft: 'auto' }}>
-          {graph.nodes.length}노드 · {graph.edges.length}엣지 {graph.errors.length ? `· 오류 ${graph.errors.length}` : ''}
+          {graph.nodes.length} nodes · {graph.edges.length} edges{graph.errors.length ? ` · ${graph.errors.length} errors` : ''}
         </span>
         {liveRun
-          ? <button className="danger" onClick={cancel}>■ 중단</button>
-          : <button className="primary" onClick={run} disabled={!!graph.errors.length || busy}>▶ 실행 (Ctrl+Enter)</button>}
+          ? <button className="danger" onClick={cancel}>■ Stop</button>
+          : <button className="primary" onClick={run} disabled={!!graph.errors.length || busy}>▶ Run (Ctrl+Enter)</button>}
       </div>
 
       {rolesOpen && (
@@ -220,74 +220,74 @@ export default function App() {
 
       <div className="bottombar">
         <input
-          placeholder='자연어로 그래프 초안/수정 — 예: "리서치 갈래 하나 더 추가하고 redteam 을 score 앞으로" (Enter)'
+          placeholder='Describe your task or edit in plain language — e.g. "add another research branch, move redteam before score" (Enter = AI draft)'
           value={nl} onChange={(e) => setNl(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && doDraft()}
         />
         {genInfo && <span className="hint rlive">{genInfo}</span>}
         <button onClick={doDraft} disabled={busy}>{busy ? '…' : 'AI draft'}</button>
-        <button onClick={doOptimize} disabled={busy} title="할 일(입력창) + 현재 그래프 + 최신 run 실측으로 구조를 재설계">
-          {busy ? '…' : '⚡ 최적화'}
+        <button onClick={doOptimize} disabled={busy} title="Redesigns the graph from your task + latest run measurements">
+          {busy ? '…' : '⚡ Optimize'}
         </button>
       </div>
 
       {proposal && (
         <div className="proposal">
           <div className="phead">
-            <b>⚡ 최적화 제안{proposal.streaming ? ' — 생성 중…' : ''}</b>
-            {!proposal.streaming && <button className="primary" onClick={() => { setMd(proposal.md); setProposal(null); setNl(''); setTimeout(() => setFitSignal((s) => s + 1), 60) }}>적용</button>}
-            <button onClick={() => setProposal(null)}>취소</button>
+            <b>⚡ Optimization proposal{proposal.streaming ? ' — generating…' : ''}</b>
+            {!proposal.streaming && <button className="primary" onClick={() => { setMd(proposal.md); setProposal(null); setNl(''); setTimeout(() => setFitSignal((s) => s + 1), 60) }}>Apply</button>}
+            <button onClick={() => setProposal(null)}>Dismiss</button>
           </div>
           <div className="prationale">{proposal.rationale}</div>
-          {!proposal.streaming && <details><summary className="hint">제안 그래프 MD 미리보기</summary><pre className="mono">{proposal.md}</pre></details>}
+          {!proposal.streaming && <details><summary className="hint">Preview proposed graph MD</summary><pre className="mono">{proposal.md}</pre></details>}
         </div>
       )}
 
       <div className="stackbar" onClick={() => setStackOpen((o) => !o)}>
-        <span>{stackOpen ? '▾' : '▸'} run 비교군 {runs.length}개</span>
+        <span>{stackOpen ? '▾' : '▸'} runs ({runs.length})</span>
         {liveRun && (
           <span className="rlive">
-            ● {liveRun.name} 실행 중 — {Object.values(statuses).filter((s) => s.status === 'done').length}/{graph.nodes.length} 노드
+            ● {liveRun.name} running — {Object.values(statuses).filter((s) => s.status === 'done').length}/{graph.nodes.length} nodes
           </span>
         )}
-        {!stackOpen && selected.length > 0 && <span className="hint">선택 {selected.length}개</span>}
+        {!stackOpen && selected.length > 0 && <span className="hint">{selected.length} selected</span>}
       </div>
       {stackOpen && (
         <div className="runstack">
           {liveRun && (
             <div className="runcard selected" onClick={() => setDrawer({ mode: 'live' })}>
-              <div className="rname rlive">● {liveRun.name} 실행 중</div>
-              <div className="rmeta">{Object.values(statuses).filter((s) => s.status === 'done').length}/{graph.nodes.length} 노드 완료</div>
+              <div className="rname rlive">● {liveRun.name} running</div>
+              <div className="rmeta">{Object.values(statuses).filter((s) => s.status === 'done').length}/{graph.nodes.length} nodes done</div>
             </div>
           )}
           {runs.map((r) => (
             <div key={r.file} className={`runcard ${selected.includes(r.file) ? 'selected' : ''}`} onClick={() => toggleRun(r.file)}>
               <div className="rname">{runLabel(r.file)}</div>
               <div className="rmeta">{(r.size / 1024).toFixed(0)}KB · {new Date(r.mtime).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
-              <div className="rmeta hint">{selected.includes(r.file) ? '선택됨 — 2개 선택 시 diff' : '클릭: 트레이스'}</div>
+              <div className="rmeta hint">{selected.includes(r.file) ? 'selected — pick 2 to diff' : 'click: trace'}</div>
             </div>
           ))}
-          {!runs.length && !liveRun && <span className="hint">아직 run 없음 — 그래프 짜고 Ctrl+Enter</span>}
+          {!runs.length && !liveRun && <span className="hint">no runs yet — build a graph and hit Ctrl+Enter</span>}
         </div>
       )}
 
       {drawer && (
         <div className="drawer">
           <div className="dhead">
-            <b>{drawer.mode === 'diff' ? `diff: ${drawer.a.label} ↔ ${drawer.b.label}` : drawer.mode === 'live' ? '실행 중 (캔버스에 실시간 표시)' : drawer.label}</b>
-            <button style={{ marginLeft: 'auto' }} onClick={() => { setDrawer(null); setSelected([]) }}>닫기</button>
+            <b>{drawer.mode === 'diff' ? `diff: ${drawer.a.label} ↔ ${drawer.b.label}` : drawer.mode === 'live' ? 'running (live on canvas)' : drawer.label}</b>
+            <button style={{ marginLeft: 'auto' }} onClick={() => { setDrawer(null); setSelected([]) }}>Close</button>
           </div>
           <div className="dbody">
             {drawer.mode === 'trace' && (
               <>
-                <h4 style={{ marginBottom: 6 }}>비용·시간 분포</h4>
+                <h4 style={{ marginBottom: 6 }}>Cost & time distribution</h4>
                 <Distribution trace={drawer.data.trace} />
-                <h4 style={{ margin: '14px 0 6px' }}>노드별 트레이스</h4>
+                <h4 style={{ margin: '14px 0 6px' }}>Per-node trace</h4>
                 <TraceList trace={drawer.data.trace} />
               </>
             )}
             {drawer.mode === 'diff' && <Diff a={drawer.a} b={drawer.b} />}
-            {drawer.mode === 'live' && <div className="hint">노드 색: 회색=대기 · 노랑=실행중 · 초록=완료 · 빨강=실패. 완료되면 run 카드가 스택에 추가된다.</div>}
+            {drawer.mode === 'live' && <div className="hint">Node colors: gray=pending · yellow=running · green=done · red=failed. The run card lands in the stack when finished.</div>}
           </div>
         </div>
       )}
