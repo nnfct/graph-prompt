@@ -6,6 +6,7 @@ import { readFile, writeFile, readdir, stat, mkdir } from 'node:fs/promises';
 import { createReadStream, existsSync } from 'node:fs';
 import { join, resolve, extname, basename } from 'node:path';
 import { parseGraph, serializeGraph, topoCheck, autoLayout } from './parse.mjs';
+import { checkCli, reportCli } from './cli-check.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const GRAPHS = join(ROOT, 'graphs');
@@ -196,18 +197,41 @@ async function aiOptimize(instruction, md, name) {
 
 // 스트리밍: 생성 중 텍스트 델타를 그대로 흘린다 — "프롬프트 체감"의 핵심.
 // 응답: text/event-stream. {t: "델타"} ... 마지막에 {done: true, ...finalize 결과}
+const GEN_SYSTEM = '너는 그래프 MD 생성기다. 도구는 없다. 파일 탐색·확인 발언 금지. 요청된 출력 형식의 텍스트만 낸다.';
+
+// 스트림 불가 환경(구/신 CLI 계약 변화) 폴백: 통짜 JSON 으로 받고 한 번에 흘린다.
+function genFallback(prompt, send, finalize, res) {
+  const p = spawn('claude', ['-p', '--output-format', 'json', '--model', 'sonnet', '--tools', 'none', '--system-prompt', GEN_SYSTEM, ...ISOLATE]);
+  let out = '', err = '';
+  p.stdout.on('data', (d) => (out += d));
+  p.stderr.on('data', (d) => (err += d));
+  p.on('close', () => {
+    let text = '';
+    try { text = JSON.parse(out).result || ''; } catch { /* 아래에서 처리 */ }
+    if (!text) send({ done: true, error: 'claude 호출 실패(폴백 포함): ' + err.slice(0, 300) });
+    else { send({ t: text }); send({ done: true, ...finalize(text) }); }
+    res.end();
+  });
+  res.on('close', () => p.kill('SIGTERM'));
+  p.stdin.write(prompt); p.stdin.end();
+}
+
 function streamClaude(res, prompt, finalize) {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
   const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  const cli = checkCli();
+  const canStream = !cli.degraded.some((d) => d.includes('--include-partial-messages'));
+  if (!cli.ok || !canStream) return genFallback(prompt, send, finalize, res);
+
   // effort low: 생성 형식이 고정된 작업이라 thinking 최소화 → 첫 델타 지연 단축.
   // system prompt 고정: 도구 흉내·리포 탐색 서사 차단.
-  const p = spawn('claude', [
+  const args = [
     '-p', '--output-format', 'stream-json', '--include-partial-messages', '--verbose',
-    '--model', 'sonnet', '--effort', 'low', '--tools', 'none',
-    '--system-prompt', '너는 그래프 MD 생성기다. 도구는 없다. 파일 탐색·확인 발언 금지. 요청된 출력 형식의 텍스트만 낸다.',
-    ...ISOLATE,
-  ]);
-  let buf = '', full = '', err = '', thinkTok = 0;
+    '--model', 'sonnet', '--tools', 'none', '--system-prompt', GEN_SYSTEM, ...ISOLATE,
+  ];
+  if (!cli.degraded.some((d) => d.includes('--effort'))) args.splice(6, 0, '--effort', 'low');
+  const p = spawn('claude', args);
+  let buf = '', full = '', err = '';
   p.stdout.on('data', (d) => {
     buf += d;
     let i;
@@ -222,15 +246,14 @@ function streamClaude(res, prompt, finalize) {
           send({ t: delta.text });
         } else if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
           send({ think: ev.estimated_tokens }); // 생각 진행 신호 — 내용은 흘리지 않는다
-        } else if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
-          thinkTok = ev.estimated_tokens || thinkTok;
-          send({ think: thinkTok }); // 생각 중 진행도 — 침묵 구간 제거
         }
       } catch { /* 비 JSON 라인 무시 */ }
     }
   });
   p.stderr.on('data', (d) => (err += d));
   p.on('close', (code) => {
+    // 스트림이 한 글자도 못 얻고 죽으면 (stream-json 계약 변화 등) 통짜 폴백 1회
+    if (!full && code !== 0 && !res.writableEnded) return genFallback(prompt, send, finalize, res);
     if (!full && code !== 0) send({ done: true, error: 'claude 호출 실패: ' + err.slice(0, 300) });
     else send({ done: true, ...finalize(full) });
     res.end();
@@ -304,6 +327,9 @@ const server = createServer(async (req, res) => {
       req.on('close', () => run.clients.delete(res));
       return;
     }
+    if (p === '/api/health' && req.method === 'GET') {
+      return json(res, 200, checkCli());
+    }
     if (p === '/api/runs' && req.method === 'GET') {
       const out = [];
       for (const f of (await readdir(RUNS)).filter((f) => f.endsWith('.json'))) {
@@ -349,4 +375,5 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`graph-prompt: http://localhost:${PORT} (로컬 전용)`);
+  reportCli(); // CLI 계약 검증 — 플래그 소실을 기동 시점에 드러낸다
 });

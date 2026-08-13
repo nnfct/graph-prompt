@@ -3,9 +3,11 @@ import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { parseGraph, topoCheck } from './parse.mjs';
 import { runGraph, saveRun, makeAppender } from './run.mjs';
+import { reportCli } from './cli-check.mjs';
 
 const file = process.argv[2];
 if (!file) { console.error('usage: node server/cli.mjs <graph.md>'); process.exit(1); }
+if (!reportCli(console.error).ok) process.exit(1);
 
 const md = await readFile(resolve(file), 'utf8');
 const g = parseGraph(md);
