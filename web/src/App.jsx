@@ -7,6 +7,7 @@ import Canvas from './Canvas.jsx'
 import { TraceList, Distribution } from './Trace.jsx'
 import Diff from './Diff.jsx'
 import * as api from './api.js'
+import { ROLES, ROLE_CATS } from './roles.js'
 
 const runLabel = (f) => f.replace(/\.json$/, '')
 
@@ -24,6 +25,9 @@ export default function App() {
   const [proposal, setProposal] = useState(null) // 최적화 제안 {md, rationale}
   const [stackOpen, setStackOpen] = useState(false) // run 비교군 — 기본 숨김
   const [fitSignal, setFitSignal] = useState(0) // 정렬/파일 전환 후 화면 재-fit
+  const [streaming, setStreaming] = useState(false) // draft 스트리밍 중 — 오류 배너 억제
+  const [rolesOpen, setRolesOpen] = useState(false) // 역할 라이브러리 — 기본 숨김
+  const [genInfo, setGenInfo] = useState('') // draft 스트리밍 진행 표시
   const stopStream = useRef(null)
 
   const graph = useMemo(() => parseGraph(md), [md])
@@ -87,28 +91,68 @@ export default function App() {
 
   const cancel = () => liveRun && api.cancelRun(liveRun.runId)
 
+  // draft: 생성되는 MD가 에디터에 실시간으로 흘러든다 (프롬프트 체감)
   const doDraft = async () => {
     if (!nl.trim() || busy) return
     setBusy(true)
-    const r = await api.draft(nl, md)
+    setStreaming(true)
+    const before = md
+    let acc = ''
+    let last = 0
+    const r = await api.streamGen('/api/draft-stream', { instruction: nl, md }, (rec) => {
+      if (rec.think) return setGenInfo(`생각 중… ${rec.think} tok`)
+      if (!rec.t) return
+      acc += rec.t
+      setGenInfo(`생성 중… ${acc.length}자`)
+      const now = Date.now()
+      if (now - last > 120) { last = now; setMd(acc) } // CodeMirror 과부하 방지
+    })
+    setStreaming(false)
     setBusy(false)
-    if (r.error) return alert(r.error)
-    if (r.errors?.length) return alert('draft 결과에 오류 — 반영 안 함:\n' + r.errors.join('\n'))
+    setGenInfo('')
+    if (r.error) { setMd(before); return alert(r.error) }
+    if (r.errors?.length) { setMd(before); return alert('draft 결과에 오류 — 반영 안 함:\n' + r.errors.join('\n')) }
     setMd(r.md)
     setNl('')
     setTimeout(() => setFitSignal((s) => s + 1), 60)
   }
 
-  // 할 일(입력창 텍스트, 없어도 됨) + 현재 그래프 + 최신 run 실측 → 최적 구조 제안
+  // 최적화: 근거+그래프가 제안 패널에 실시간으로 흘러든다
   const doOptimize = async () => {
     if (busy) return
     setBusy(true)
-    const r = await api.optimize(nl, md, file?.replace(/\.md$/, ''))
+    setProposal({ streaming: true, rationale: '', md: '' })
+    let acc = ''
+    let last = 0
+    const r = await api.streamGen('/api/optimize-stream', { instruction: nl, md, name: file?.replace(/\.md$/, '') }, (rec) => {
+      if (rec.think) return setProposal({ streaming: true, rationale: `생각 중… ${rec.think} tok`, md: '' })
+      if (!rec.t) return
+      acc += rec.t
+      const now = Date.now()
+      if (now - last > 120) { last = now; setProposal({ streaming: true, rationale: acc, md: '' }) }
+    })
     setBusy(false)
-    if (r.error) return alert(r.error + (r.raw ? '\n\n' + r.raw : ''))
-    if (r.errors?.length) return alert('제안 그래프에 오류 — 반영 안 함:\n' + r.errors.join('\n'))
-    setProposal(r) // 바로 덮어쓰지 않는다 — 근거 보고 적용/취소
+    if (r.error) { setProposal(null); return alert(r.error + (r.raw ? '\n\n' + r.raw : '')) }
+    if (r.errors?.length) { setProposal(null); return alert('제안 그래프에 오류 — 반영 안 함:\n' + r.errors.join('\n')) }
+    setProposal(r) // 근거 보고 적용/취소
   }
+
+  // 역할 라이브러리에서 노드 삽입
+  const insertRole = (role) => mutate((g) => {
+    let id = role.id, i = 1
+    while (g.nodes.some((n) => n.id === id)) id = `${role.id}${++i}`
+    const attrs = []
+    if (role.model) attrs.push({ k: 'model', v: role.model, block: false })
+    if (role.lens) attrs.push({ k: 'lens', v: role.lens, block: false })
+    attrs.push({ k: 'prompt', v: role.prompt, block: role.prompt.includes('\n') })
+    if (role.out) attrs.push({ k: 'out', v: role.out, block: false })
+    g.nodes.push({
+      id, type: role.type, attrs,
+      prompt: role.prompt, out: role.out || '', lens: role.lens ? role.lens.split(',').map((s) => s.trim()) : [],
+      next: [], inExplicit: [], in: [], loop: null,
+      pos: [80, 80 + g.nodes.length * 70],
+    })
+  })
 
   const toggleRun = (f) => setSelected((s) => (s.includes(f) ? s.filter((x) => x !== f) : [...s.slice(-1), f]))
   const openTrace = async () => {
@@ -131,6 +175,7 @@ export default function App() {
         </select>
         <button onClick={addNode}>+ 노드</button>
         <button onClick={() => { mutate((g) => autoLayout(g)); setTimeout(() => setFitSignal((s) => s + 1), 60) }} title="계층 자동 정렬 — 좌→우 흐름으로 재배치">정렬</button>
+        <button onClick={() => setRolesOpen((o) => !o)} title="그래프 엔지니어링 역할 라이브러리">{rolesOpen ? '역할 ▾' : '역할 ▸'}</button>
         <button onClick={save}>저장</button>
         <span className="hint" style={{ marginLeft: 'auto' }}>
           {graph.nodes.length}노드 · {graph.edges.length}엣지 {graph.errors.length ? `· 오류 ${graph.errors.length}` : ''}
@@ -140,9 +185,27 @@ export default function App() {
           : <button className="primary" onClick={run} disabled={!!graph.errors.length || busy}>▶ 실행 (Ctrl+Enter)</button>}
       </div>
 
+      {rolesOpen && (
+        <div className="rolespanel">
+          {ROLE_CATS.map((cat) => (
+            <div key={cat} className="rolecat">
+              <div className="rolecat-title">{cat}</div>
+              {ROLES.filter((r) => r.cat === cat).map((r) => (
+                <div key={r.id} className="rolerow" title={r.prompt}>
+                  <span className="mono roleid">{r.id}</span>
+                  <span className="roletype" data-t={r.type}>{r.type}{r.model ? `·${r.model}` : ''}{r.lens ? '·lens' : ''}</span>
+                  <span className="rolewhen">{r.when}</span>
+                  <button onClick={() => insertRole(r)}>＋</button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="main">
         <div className="editor-pane">
-          {graph.errors.length > 0 && <div className="errors">{graph.errors.join('\n')}</div>}
+          {graph.errors.length > 0 && !streaming && <div className="errors">{graph.errors.join('\n')}</div>}
           <CodeMirror
             value={md} theme={oneDark} extensions={[markdown()]} height="100%"
             onChange={setMd} style={{ flex: 1, minHeight: 0 }}
@@ -161,6 +224,7 @@ export default function App() {
           value={nl} onChange={(e) => setNl(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && doDraft()}
         />
+        {genInfo && <span className="hint rlive">{genInfo}</span>}
         <button onClick={doDraft} disabled={busy}>{busy ? '…' : 'AI draft'}</button>
         <button onClick={doOptimize} disabled={busy} title="할 일(입력창) + 현재 그래프 + 최신 run 실측으로 구조를 재설계">
           {busy ? '…' : '⚡ 최적화'}
@@ -170,12 +234,12 @@ export default function App() {
       {proposal && (
         <div className="proposal">
           <div className="phead">
-            <b>⚡ 최적화 제안</b>
-            <button className="primary" onClick={() => { setMd(proposal.md); setProposal(null); setNl(''); setTimeout(() => setFitSignal((s) => s + 1), 60) }}>적용</button>
+            <b>⚡ 최적화 제안{proposal.streaming ? ' — 생성 중…' : ''}</b>
+            {!proposal.streaming && <button className="primary" onClick={() => { setMd(proposal.md); setProposal(null); setNl(''); setTimeout(() => setFitSignal((s) => s + 1), 60) }}>적용</button>}
             <button onClick={() => setProposal(null)}>취소</button>
           </div>
           <div className="prationale">{proposal.rationale}</div>
-          <details><summary className="hint">제안 그래프 MD 미리보기</summary><pre className="mono">{proposal.md}</pre></details>
+          {!proposal.streaming && <details><summary className="hint">제안 그래프 MD 미리보기</summary><pre className="mono">{proposal.md}</pre></details>}
         </div>
       )}
 

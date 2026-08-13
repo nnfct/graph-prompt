@@ -86,12 +86,15 @@ const SPEC = `그래프 MD 스펙:
 - research 노드만 웹검색 가능. red-team 은 lens 3개(출처신뢰도, 결론반증, 놓친관점)가 관례.
 - 해석 불가 라인은 에러다. 스펙 밖 문법 금지. 주석 금지.`;
 
+function draftPrompt(instruction, currentMd) {
+  return currentMd
+    ? `${SPEC}\n\n# 현재 그래프\n${currentMd}\n\n# 지시\n${instruction}\n\n# 출력 규칙\n수정된 그래프 MD 전문만 출력한다. 코드펜스·해설 금지. frontmatter(---)부터 시작한다.`
+    : `${SPEC}\n\n# 지시\n다음 작업을 수행하는 그래프를 설계한다: ${instruction}\n\n노드 4~9개. 병렬 갈래와 검증(red-team) 단계를 적극 사용한다.\n\n# 출력 규칙\n그래프 MD 전문만 출력한다. 코드펜스·해설 금지. frontmatter(---)부터 시작한다.`;
+}
+
 // 자연어 → 그래프 MD (draft / patch). 파싱 검증 후 반환, 실패 시 에러와 원문.
 async function aiDraft(instruction, currentMd) {
-  const spec = SPEC;
-  const prompt = currentMd
-    ? `${spec}\n\n# 현재 그래프\n${currentMd}\n\n# 지시\n${instruction}\n\n# 출력 규칙\n수정된 그래프 MD 전문만 출력한다. 코드펜스·해설 금지. frontmatter(---)부터 시작한다.`
-    : `${spec}\n\n# 지시\n다음 작업을 수행하는 그래프를 설계한다: ${instruction}\n\n노드 4~9개. 병렬 갈래와 검증(red-team) 단계를 적극 사용한다.\n\n# 출력 규칙\n그래프 MD 전문만 출력한다. 코드펜스·해설 금지. frontmatter(---)부터 시작한다.`;
+  const prompt = draftPrompt(instruction, currentMd);
 
   const r = await new Promise((ok) => {
     const p = spawn('claude', ['-p', '--output-format', 'json', '--model', 'sonnet', '--tools', 'none', ...ISOLATE]);
@@ -103,11 +106,7 @@ async function aiDraft(instruction, currentMd) {
   });
   let text = '';
   try { text = JSON.parse(r.out).result || ''; } catch { return { error: 'claude 호출 실패: ' + r.err.slice(0, 300) }; }
-  text = text.replace(/^```(?:markdown|md)?\n?/, '').replace(/\n?```\s*$/, '').trim() + '\n';
-  const g = parseGraph(text);
-  // AI 가 준 좌표는 대개 엉망 — 항상 계층 정렬로 다시 깐다
-  if (!g.errors.length) text = serializeGraph(autoLayout(g));
-  return { md: text, errors: g.errors };
+  return finalizeDraft(text);
 }
 
 // 최신 run 트레이스에서 노드별 실측 요약을 뽑는다 (최적화 프롬프트 재료)
@@ -134,8 +133,7 @@ async function runStats(name) {
   };
 }
 
-// 할 일 + 현재 그래프 + 실측 → 최적화된 그래프 제안
-async function aiOptimize(instruction, md, name) {
+async function optimizePrompt(instruction, md, name) {
   const stats = name ? await runStats(name) : null;
   const statsText = stats
     ? `# 최신 실행 실측 (${stats.file}, 전체 ${stats.totalMin}분)\n${stats.lines.join('\n')}\n루프 판정:\n${stats.loops.join('\n') || '(없음)'}`
@@ -160,7 +158,29 @@ ${hasGraph ? `# 현재 그래프\n${md}\n\n할 일이 현재 그래프와 같은
 
 # 출력 형식 (정확히 이 형식)
 근거를 5줄 이내로 쓴 뒤, 구분선 =====GRAPH===== 다음 줄부터 그래프 MD 전문만 출력한다. 코드펜스 금지.`;
+  return prompt;
+}
 
+function finalizeOptimize(text) {
+  const cut = text.indexOf('=====GRAPH=====');
+  if (cut === -1) return { error: '형식 불일치 — 재시도 필요', raw: text.slice(0, 500) };
+  const rationale = text.slice(0, cut).trim();
+  let gmd = text.slice(cut + 15).replace(/^```(?:markdown|md)?\n?/m, '').replace(/\n?```\s*$/, '').trim() + '\n';
+  const g = parseGraph(gmd);
+  if (!g.errors.length) gmd = serializeGraph(autoLayout(g));
+  return { md: gmd, rationale, errors: g.errors };
+}
+
+function finalizeDraft(text) {
+  let gmd = text.replace(/^```(?:markdown|md)?\n?/, '').replace(/\n?```\s*$/, '').trim() + '\n';
+  const g = parseGraph(gmd);
+  if (!g.errors.length) gmd = serializeGraph(autoLayout(g));
+  return { md: gmd, errors: g.errors };
+}
+
+// 할 일 + 현재 그래프 + 실측 → 최적화된 그래프 제안 (비스트리밍 경로)
+async function aiOptimize(instruction, md, name) {
+  const prompt = await optimizePrompt(instruction, md, name);
   const r = await new Promise((ok) => {
     const p = spawn('claude', ['-p', '--output-format', 'json', '--model', 'sonnet', '--tools', 'none', ...ISOLATE]);
     let out = '', err = '';
@@ -171,13 +191,52 @@ ${hasGraph ? `# 현재 그래프\n${md}\n\n할 일이 현재 그래프와 같은
   });
   let text = '';
   try { text = JSON.parse(r.out).result || ''; } catch { return { error: 'claude 호출 실패: ' + r.err.slice(0, 300) }; }
-  const cut = text.indexOf('=====GRAPH=====');
-  if (cut === -1) return { error: '형식 불일치 — 재시도 필요', raw: text.slice(0, 500) };
-  const rationale = text.slice(0, cut).trim();
-  let gmd = text.slice(cut + 15).replace(/^```(?:markdown|md)?\n?/m, '').replace(/\n?```\s*$/, '').trim() + '\n';
-  const g = parseGraph(gmd);
-  if (!g.errors.length) gmd = serializeGraph(autoLayout(g));
-  return { md: gmd, rationale, errors: g.errors };
+  return finalizeOptimize(text);
+}
+
+// 스트리밍: 생성 중 텍스트 델타를 그대로 흘린다 — "프롬프트 체감"의 핵심.
+// 응답: text/event-stream. {t: "델타"} ... 마지막에 {done: true, ...finalize 결과}
+function streamClaude(res, prompt, finalize) {
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+  const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  // effort low: 생성 형식이 고정된 작업이라 thinking 최소화 → 첫 델타 지연 단축.
+  // system prompt 고정: 도구 흉내·리포 탐색 서사 차단.
+  const p = spawn('claude', [
+    '-p', '--output-format', 'stream-json', '--include-partial-messages', '--verbose',
+    '--model', 'sonnet', '--effort', 'low', '--tools', 'none',
+    '--system-prompt', '너는 그래프 MD 생성기다. 도구는 없다. 파일 탐색·확인 발언 금지. 요청된 출력 형식의 텍스트만 낸다.',
+    ...ISOLATE,
+  ]);
+  let buf = '', full = '', err = '', thinkTok = 0;
+  p.stdout.on('data', (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 1);
+      if (!line.trim()) continue;
+      try {
+        const ev = JSON.parse(line);
+        const delta = ev?.event?.delta;
+        if (ev.type === 'stream_event' && delta?.type === 'text_delta' && delta.text) {
+          full += delta.text;
+          send({ t: delta.text });
+        } else if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
+          send({ think: ev.estimated_tokens }); // 생각 진행 신호 — 내용은 흘리지 않는다
+        } else if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
+          thinkTok = ev.estimated_tokens || thinkTok;
+          send({ think: thinkTok }); // 생각 중 진행도 — 침묵 구간 제거
+        }
+      } catch { /* 비 JSON 라인 무시 */ }
+    }
+  });
+  p.stderr.on('data', (d) => (err += d));
+  p.on('close', (code) => {
+    if (!full && code !== 0) send({ done: true, error: 'claude 호출 실패: ' + err.slice(0, 300) });
+    else send({ done: true, ...finalize(full) });
+    res.end();
+  });
+  res.on('close', () => p.kill('SIGTERM')); // 클라이언트 이탈 시 생성 중단
+  p.stdin.write(prompt); p.stdin.end();
 }
 
 const server = createServer(async (req, res) => {
@@ -250,6 +309,14 @@ const server = createServer(async (req, res) => {
     if (p === '/api/optimize' && req.method === 'POST') {
       const { instruction, md, name } = await readBody(req);
       return json(res, 200, await aiOptimize(instruction || '', md || '', safeName(name) ? name : null));
+    }
+    if (p === '/api/draft-stream' && req.method === 'POST') {
+      const { instruction, md } = await readBody(req);
+      return streamClaude(res, draftPrompt(instruction, md || ''), finalizeDraft);
+    }
+    if (p === '/api/optimize-stream' && req.method === 'POST') {
+      const { instruction, md, name } = await readBody(req);
+      return streamClaude(res, await optimizePrompt(instruction || '', md || '', safeName(name) ? name : null), finalizeOptimize);
     }
 
     // 정적 파일 (web/dist)
