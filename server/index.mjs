@@ -2,7 +2,7 @@
 // 실행은 run-child.mjs 자식 프로세스: 취소=kill, 서버 크래시와 격리.
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { readFile, writeFile, readdir, stat, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, readdir, stat, mkdir, unlink } from 'node:fs/promises';
 import { createReadStream, existsSync } from 'node:fs';
 import { join, resolve, extname, basename } from 'node:path';
 import { parseGraph, serializeGraph, topoCheck, autoLayout } from './parse.mjs';
@@ -69,12 +69,14 @@ async function startRun(md, name) {
       try { broadcast(run, JSON.parse(line)); } catch { /* 비정형 라인 무시 */ }
     }
   });
+  child.on('error', (e) => broadcast(run, { kind: 'stderr', text: 'run-child 실행 불가: ' + String(e).slice(0, 300) }));
   child.stderr.on('data', (d) => broadcast(run, { kind: 'stderr', text: String(d).slice(0, 2000) }));
   child.on('close', (code) => {
     run.status = code === 0 ? 'done' : run.status === 'canceled' ? 'canceled' : 'failed';
     broadcast(run, { kind: 'child:exit', code, status: run.status });
     for (const c of run.clients) c.end();
     run.clients.clear();
+    unlink(mdFile).catch(() => {}); // .live 임시 그래프 누적 방지 (원문은 saveRun 이 graphMd 로 동봉)
   });
   return { runId };
 }
@@ -101,6 +103,7 @@ async function aiDraft(instruction, currentMd) {
   const r = await new Promise((ok) => {
     const p = spawn('claude', ['-p', '--output-format', 'json', '--model', 'sonnet', '--tools', 'none', ...ISOLATE]);
     let out = '', err = '';
+    p.on('error', (e) => ok({ out: '', err: String(e) })); // ENOENT 등 — 서버 크래시 방지
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d) => (err += d));
     p.on('close', () => ok({ out, err }));
@@ -186,6 +189,7 @@ async function aiOptimize(instruction, md, name) {
   const r = await new Promise((ok) => {
     const p = spawn('claude', ['-p', '--output-format', 'json', '--model', 'sonnet', '--tools', 'none', ...ISOLATE]);
     let out = '', err = '';
+    p.on('error', (e) => ok({ out: '', err: String(e) })); // ENOENT 등 — 서버 크래시 방지
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d) => (err += d));
     p.on('close', () => ok({ out, err }));
@@ -202,16 +206,23 @@ const GEN_SYSTEM = '너는 그래프 MD 생성기다. 도구는 없다. 파일 �
 
 // 스트림 불가 환경(구/신 CLI 계약 변화) 폴백: 통짜 JSON 으로 받고 한 번에 흘린다.
 function genFallback(prompt, send, finalize, res) {
+  if (res.destroyed || res.writableEnded) return;
   const p = spawn('claude', ['-p', '--output-format', 'json', '--model', 'sonnet', '--tools', 'none', '--system-prompt', GEN_SYSTEM, ...ISOLATE]);
-  let out = '', err = '';
+  let out = '', err = '', finished = false;
+  const finish = (obj) => {
+    if (finished || res.destroyed || res.writableEnded) return;
+    finished = true;
+    send(obj);
+    res.end();
+  };
+  p.on('error', (e) => finish({ done: true, error: 'claude 실행 불가: ' + String(e).slice(0, 200) }));
   p.stdout.on('data', (d) => (out += d));
   p.stderr.on('data', (d) => (err += d));
   p.on('close', () => {
     let text = '';
     try { text = JSON.parse(out).result || ''; } catch { /* 아래에서 처리 */ }
-    if (!text) send({ done: true, error: 'claude 호출 실패(폴백 포함): ' + err.slice(0, 300) });
-    else { send({ t: text }); send({ done: true, ...finalize(text) }); }
-    res.end();
+    if (!text) finish({ done: true, error: 'claude 호출 실패(폴백 포함): ' + err.slice(0, 300) });
+    else { send({ t: text }); finish({ done: true, ...finalize(text) }); }
   });
   res.on('close', () => p.kill('SIGTERM'));
   p.stdin.write(prompt); p.stdin.end();
@@ -219,47 +230,55 @@ function genFallback(prompt, send, finalize, res) {
 
 function streamClaude(res, prompt, finalize) {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-  const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  const send = (obj) => { if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`); };
   const cli = checkCli();
+  // 필수 계약이 깨졌으면 폴백도 같은 플래그로 실패한다 — 즉시 에러로 끝낸다
+  if (!cli.version || cli.missing.length) {
+    send({ done: true, error: 'claude CLI 계약 불일치: ' + (cli.missing.join(', ') || 'CLI 미검출') + ' — /api/health 확인' });
+    return res.end();
+  }
   const canStream = !cli.degraded.some((d) => d.includes('--include-partial-messages'));
-  if (!cli.ok || !canStream) return genFallback(prompt, send, finalize, res);
+  if (!canStream) return genFallback(prompt, send, finalize, res);
 
   // effort low: 생성 형식이 고정된 작업이라 thinking 최소화 → 첫 델타 지연 단축.
   // system prompt 고정: 도구 흉내·리포 탐색 서사 차단.
+  const hasEffort = !cli.degraded.some((d) => d.includes('--effort'));
   const args = [
     '-p', '--output-format', 'stream-json', '--include-partial-messages', '--verbose',
-    '--model', 'sonnet', '--tools', 'none', '--system-prompt', GEN_SYSTEM, ...ISOLATE,
+    '--model', 'sonnet', ...(hasEffort ? ['--effort', 'low'] : []),
+    '--tools', 'none', '--system-prompt', GEN_SYSTEM, ...ISOLATE,
   ];
-  if (!cli.degraded.some((d) => d.includes('--effort'))) args.splice(6, 0, '--effort', 'low');
   const p = spawn('claude', args);
-  let buf = '', full = '', err = '';
+  let buf = '', full = '', err = '', aborted = false;
+  const eat = (line) => {
+    if (!line.trim()) return;
+    try {
+      const ev = JSON.parse(line);
+      const delta = ev?.event?.delta;
+      if (ev.type === 'stream_event' && delta?.type === 'text_delta' && delta.text) {
+        full += delta.text;
+        send({ t: delta.text });
+      } else if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
+        send({ think: ev.estimated_tokens }); // 생각 진행 신호 — 내용은 흘리지 않는다
+      }
+    } catch { /* 비 JSON 라인 무시 */ }
+  };
+  p.on('error', (e) => { send({ done: true, error: 'claude 실행 불가: ' + String(e).slice(0, 200) }); res.end(); });
   p.stdout.on('data', (d) => {
     buf += d;
     let i;
-    while ((i = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, i); buf = buf.slice(i + 1);
-      if (!line.trim()) continue;
-      try {
-        const ev = JSON.parse(line);
-        const delta = ev?.event?.delta;
-        if (ev.type === 'stream_event' && delta?.type === 'text_delta' && delta.text) {
-          full += delta.text;
-          send({ t: delta.text });
-        } else if (ev.type === 'system' && ev.subtype === 'thinking_tokens') {
-          send({ think: ev.estimated_tokens }); // 생각 진행 신호 — 내용은 흘리지 않는다
-        }
-      } catch { /* 비 JSON 라인 무시 */ }
-    }
+    while ((i = buf.indexOf('\n')) >= 0) { eat(buf.slice(0, i)); buf = buf.slice(i + 1); }
   });
   p.stderr.on('data', (d) => (err += d));
   p.on('close', (code) => {
-    // 스트림이 한 글자도 못 얻고 죽으면 (stream-json 계약 변화 등) 통짜 폴백 1회
-    if (!full && code !== 0 && !res.writableEnded) return genFallback(prompt, send, finalize, res);
-    if (!full && code !== 0) send({ done: true, error: 'claude 호출 실패: ' + err.slice(0, 300) });
-    else send({ done: true, ...finalize(full) });
+    eat(buf); // 마지막 줄 개행 누락 대비
+    if (aborted || res.destroyed || res.writableEnded) return;
+    // 델타를 한 글자도 못 얻었으면 (stream-json 계약 변화 등) 종료코드 무관 통짜 폴백 1회
+    if (!full) return genFallback(prompt, send, finalize, res);
+    send({ done: true, ...finalize(full) });
     res.end();
   });
-  res.on('close', () => p.kill('SIGTERM')); // 클라이언트 이탈 시 생성 중단
+  res.on('close', () => { aborted = true; p.kill('SIGTERM'); }); // 클라이언트 이탈 시 생성 중단, 폴백 금지
   p.stdin.write(prompt); p.stdin.end();
 }
 

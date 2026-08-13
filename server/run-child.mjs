@@ -17,12 +17,18 @@ const runsDir = resolve(import.meta.dirname, '../runs');
 const appender = makeAppender(runsDir, graphName, runId);
 const out = (rec) => process.stdout.write(JSON.stringify(rec) + '\n');
 
-// SIGTERM 시 자식 claude/codex 프로세스도 함께 죽도록 프로세스 그룹째 종료
-process.on('SIGTERM', () => process.exit(143));
+// SIGTERM(취소) 시: run:start 에서 받아둔 tmpdir 를 정리하고 종료.
+// 프로세스 그룹째 SIGTERM 이므로 자식 claude/codex 도 함께 죽는다.
+import { rmSync } from 'node:fs';
+let runCwd = null;
+process.on('SIGTERM', () => {
+  if (runCwd) { try { rmSync(runCwd, { recursive: true, force: true }); } catch { /* noop */ } }
+  process.exit(143);
+});
 
 const res = await runGraph(g, {
   runId,
-  appendEvent: (rec) => { appender.append(rec); out(rec); },
+  appendEvent: (rec) => { if (rec.kind === 'run:start') runCwd = rec.cwd; appender.append(rec); out(rec); },
   emit: (e) => { if (e.type === 'node:start' || e.type === 'node:skipped' || e.type === 'loop' || e.type === 'run:start') out({ kind: 'live', ...e }); },
 });
 
